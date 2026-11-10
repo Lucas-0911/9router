@@ -102,3 +102,8 @@ graphify-out/*
 start-dev-silent.cjs
 debug.log
 .scratch/
+
+# Rust desktop build output and private test data
+/desktop/target/
+/desktop/.data/
+/desktop/.cargo-home/
