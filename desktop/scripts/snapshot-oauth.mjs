@@ -25,7 +25,9 @@ for (const p of registry) {
   sources[p.id] = createHash('sha256').update(source).digest('hex');
   const flowType = source.match(/flowType:\s*"([^"]+)"/)?.[1] ||
     (['qoder','qoder-cn','minimax-code','minimax-code-global'].includes(p.id)?'device_code':null);
-  const config = overrides[p.id] || p.oauth || {};
+  const config = { ...(overrides[p.id] || p.oauth || {}) };
+  // Rust computes OS/architecture metadata at runtime; it is not public static configuration.
+  delete config.loadCodeAssistClientMetadata;
   providers[p.id] = { flowType, config };
 }
 providers['minimax-code'].config = {clientId:'mcode-public',scope:'agent.default',audience:'agent-backend',

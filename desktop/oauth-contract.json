@@ -50,8 +50,7 @@
         "loadCodeAssistEndpoint": "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
         "onboardUserEndpoint": "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
         "loadCodeAssistUserAgent": "antigravity/hub/2.24.0 darwin/arm64",
-        "refreshLeadMs": 300000,
-        "loadCodeAssistClientMetadata": "{\"ideType\":9,\"platform\":2,\"pluginType\":2}"
+        "refreshLeadMs": 300000
       }
     },
     "claude": {
