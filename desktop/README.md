@@ -10,7 +10,8 @@ Implemented and verified on macOS arm64:
 - Native SQLite creation with all 11 upstream tables, private permissions,
   compatible columns, atomic JSON KV transactions and corruption reporting.
 - Explicit SQLite backup/import from a read-only source, including live WAL
-  data. Existing destination files are never overwritten. No live user database
+  data. Failed imports never publish an empty or partial destination; existing
+  destination files are never overwritten. No live user database
   is imported or modified automatically.
 - Native `open-sse/services/model.js` model parsing/provider resolution,
   including registry aliases and bare-model inference. Rust outputs match
@@ -30,7 +31,7 @@ Node runs only the development reference/snapshot generator. The Rust crate
 does not launch Node or Python. The crate currently links the host SQLite
 library; Linux development requires SQLite headers and pkg-config.
 
-The current six Rust test functions cover persistence and the model-resolution
+The current seven Rust test functions cover persistence and the model-resolution
 oracle; they are not the upstream JavaScript test suite or live provider tests.
 
 Still required before release: HTTP/API server, all provider executors and

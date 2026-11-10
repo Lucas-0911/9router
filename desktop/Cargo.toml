@@ -2,6 +2,7 @@
 name = "nine-router-core"
 version = "0.1.0-alpha.1"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
 description = "Native Rust backend migration for 9Router"
 
@@ -9,6 +10,4 @@ description = "Native Rust backend migration for 9Router"
 rusqlite = { version = "0.40.2", features = ["backup"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-
-[dev-dependencies]
 tempfile = "3.27.0"

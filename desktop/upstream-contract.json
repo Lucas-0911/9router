@@ -1708,7 +1708,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -1983,7 +1983,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "flux-pro-1.1",
@@ -2194,7 +2194,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -2245,7 +2245,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -3103,7 +3103,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "flux-dev",
@@ -3235,7 +3235,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -3493,7 +3493,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -3505,7 +3505,7 @@
         "tts",
         "stt"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "scribe_v1",
@@ -3544,7 +3544,7 @@
         "webSearch",
         "webFetch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -3555,7 +3555,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "fal-ai/flux/schnell",
@@ -3670,7 +3670,7 @@
       "serviceKinds": [
         "webFetch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -3711,7 +3711,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -4206,7 +4206,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -4217,7 +4217,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -4410,7 +4410,7 @@
         "image",
         "stt"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "black-forest-labs/FLUX.1-schnell",
@@ -4711,7 +4711,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -4722,7 +4722,7 @@
       "serviceKinds": [
         "embedding"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -4733,7 +4733,7 @@
       "serviceKinds": [
         "webFetch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -5182,7 +5182,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -5228,7 +5228,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -5627,7 +5627,7 @@
       "serviceKinds": [
         "systemone"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "drex-max",
@@ -6630,7 +6630,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8061,7 +8061,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8246,7 +8246,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "recraftv3",
@@ -8312,7 +8312,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "gen4_image",
@@ -8367,7 +8367,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "stable-diffusion-v1-5",
@@ -8397,7 +8397,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8408,7 +8408,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8419,7 +8419,7 @@
       "serviceKinds": [
         "embedding"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "embedding",
@@ -8436,7 +8436,7 @@
       "serviceKinds": [
         "stt"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "whisper-1",
@@ -8459,7 +8459,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "kokoro",
@@ -8556,7 +8556,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8641,7 +8641,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "stable-image-ultra",
@@ -8695,7 +8695,7 @@
         "webSearch",
         "webFetch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8727,7 +8727,7 @@
         "webSearch",
         "webFetch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8913,7 +8913,7 @@
       "serviceKinds": [
         "image"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -8924,7 +8924,7 @@
       "serviceKinds": [
         "tts"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -9461,7 +9461,7 @@
       "serviceKinds": [
         "systemone"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "rev-latest",
@@ -9577,7 +9577,7 @@
         "image",
         "video"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "veo",
@@ -9792,7 +9792,7 @@
       "serviceKinds": [
         "embedding"
       ],
-      "format": "openai",
+      "format": null,
       "models": [
         {
           "id": "voyage-3-large",
@@ -10008,7 +10008,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {
@@ -10019,7 +10019,7 @@
       "serviceKinds": [
         "webSearch"
       ],
-      "format": "openai",
+      "format": null,
       "models": []
     },
     {

@@ -16,6 +16,10 @@ fn schema_and_catalog_match_the_complete_upstream_snapshot() {
     let openai = catalog.provider("openai").unwrap();
     assert!(openai.models.iter().any(|model| model["id"] == "gpt-5.5"));
     assert_eq!(catalog.provider("muse-web").unwrap().category, "webCookie");
+    assert!(
+        catalog.provider("aws-polly").unwrap().format.is_none(),
+        "Media-only providers do not have a chat transport"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -119,4 +123,47 @@ fn explicit_import_copies_live_wal_data_without_modifying_the_source() {
     );
     assert_eq!(fs::read(source).unwrap(), original);
     assert_eq!(fs::read(wal_path).unwrap(), original_wal);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_backup_never_publishes_a_partial_database() {
+    if let (Ok(source), Ok(destination)) = (
+        std::env::var("NINE_ROUTER_TEST_IMPORT_SOURCE"),
+        std::env::var("NINE_ROUTER_TEST_IMPORT_DESTINATION"),
+    ) {
+        assert!(Store::import(source.as_ref(), destination.as_ref()).is_err());
+        assert!(!std::path::Path::new(&destination).exists());
+        return;
+    }
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("large.sqlite");
+    let destination = temporary.path().join("must-not-exist.sqlite");
+    let mut store = Store::create(&source).unwrap();
+    store
+        .put_batch(&[("fixture", "large", &json!("x".repeat(1024 * 1024)))])
+        .unwrap();
+    drop(store);
+    let outcome = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "ulimit -c 0; trap '' XFSZ; ulimit -f 256; exec \"$@\"",
+            "sh",
+        ])
+        .arg(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "a_failed_backup_never_publishes_a_partial_database",
+            "--nocapture",
+        ])
+        .env("NINE_ROUTER_TEST_IMPORT_SOURCE", &source)
+        .env("NINE_ROUTER_TEST_IMPORT_DESTINATION", &destination)
+        .output()
+        .unwrap();
+    assert!(
+        outcome.status.success(),
+        "{}",
+        String::from_utf8_lossy(&outcome.stdout)
+    );
+    assert!(!destination.exists());
 }

@@ -28,7 +28,7 @@ pub struct Provider {
     pub models: Vec<Value>,
     #[serde(rename = "serviceKinds")]
     pub service_kinds: Vec<String>,
-    pub format: String,
+    pub format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -60,8 +60,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// Reserve a new private file atomically. Existing files are never replaced.
-    pub fn create(path: &Path) -> Result<Self> {
+    fn prepare_parent(path: &Path) -> Result<()> {
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
@@ -75,6 +74,12 @@ impl Store {
             }
             directories.create(parent)?;
         }
+        Ok(())
+    }
+
+    /// Reserve a new private file atomically. Existing files are never replaced.
+    pub fn create(path: &Path) -> Result<Self> {
+        Self::prepare_parent(path)?;
         let mut options = OpenOptions::new();
         options.create_new(true).read(true).write(true);
         #[cfg(unix)]
@@ -110,7 +115,18 @@ impl Store {
             connection: source_connection,
         };
         source_store.validate_schema()?;
-        let mut destination_store = Self::create(destination)?;
+        Self::prepare_parent(destination)?;
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let temporary = tempfile::NamedTempFile::new_in(parent)?;
+        let mut destination_store = Self {
+            connection: Connection::open_with_flags(
+                temporary.path(),
+                OpenFlags::SQLITE_OPEN_READ_WRITE,
+            )?,
+        };
         {
             let backup = Backup::new(&source_store.connection, &mut destination_store.connection)?;
             let deadline = Instant::now() + Duration::from_secs(30);
@@ -132,7 +148,14 @@ impl Store {
             }
         }
         destination_store.validate_schema()?;
-        Ok(destination_store)
+        destination_store
+            .connection
+            .close()
+            .map_err(|(_, error)| error)?;
+        temporary
+            .persist_noclobber(destination)
+            .map_err(|error| error.error)?;
+        Self::open(destination)
     }
 
     pub fn table_names(&self) -> Result<Vec<String>> {

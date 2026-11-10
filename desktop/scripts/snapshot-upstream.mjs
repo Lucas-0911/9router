@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import registry from '../../open-sse/providers/registry/index.js';
 import { normalizeModel } from '../../open-sse/providers/models/schema.js';
@@ -20,17 +20,18 @@ async function files(directory) {
   return groups.flat().sort();
 }
 const sha = data => createHash('sha256').update(data).digest('hex');
-const apiFiles = (await files(join(root, 'src/app/api'))).filter(p => p.endsWith('/route.js'));
+const portable = path => path.split(sep).join('/');
+const apiFiles = (await files(join(root, 'src/app/api'))).filter(p => basename(p) === 'route.js');
 const routes = await Promise.all(apiFiles.map(async path => {
   const text = await readFile(path, 'utf8');
-  return { source: relative(root, path), path: '/' + relative(join(root, 'src/app'), dirname(path)),
+  return { source: portable(relative(root, path)), path: '/' + portable(relative(join(root, 'src/app'), dirname(path))),
     sha256: sha(text) };
 }));
 const providers = registry.map(provider => ({
   id: provider.id, alias: provider.alias ?? provider.id,
   name: provider.display?.name ?? provider.id, category: provider.category,
   serviceKinds: provider.serviceKinds ?? [],
-  format: provider.transport?.format ?? 'openai',
+  format: provider.transport ? provider.transport.format ?? 'openai' : null,
   models: (provider.models ?? []).map(normalizeModel),
 })).sort((a, b) => a.id.localeCompare(b.id, 'en'));
 assert.equal(new Set(providers.map(p => p.id)).size, providers.length, 'Duplicate provider IDs');
@@ -40,8 +41,8 @@ const providerAliases = Object.fromEntries([...new Set(['el', 'jina', 'polly', '
   .sort().map(alias => [alias, resolveProviderAlias(alias)]));
 const schema = Object.entries(TABLES).flatMap(([name, definition]) =>
   [buildCreateTableSql(name, definition), ...(definition.indexes ?? [])]).join(';\n') + ';\n';
-const pages = (await files(join(root, 'src/app'))).filter(p => /\/page\.[jt]sx?$/.test(p))
-  .map(p => relative(root, p));
+const pages = (await files(join(root, 'src/app'))).filter(p => /^page\.[jt]sx?$/.test(basename(p)))
+  .map(p => portable(relative(root, p)));
 const manifest = {
   upstream: 'https://github.com/decolua/9router',
   revision: execFileSync('git', ['rev-parse', 'upstream/master'], { cwd: root, encoding: 'utf8' }).trim(),
