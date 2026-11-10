@@ -2,8 +2,9 @@ use nine_router_core::{
     Store,
     web_login::{PROVIDERS, WebLoginService},
 };
+#[cfg(unix)]
+use std::fs;
 use std::{
-    fs,
     sync::{Arc, Mutex},
     time::Duration,
 };
