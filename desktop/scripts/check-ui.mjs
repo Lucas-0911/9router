@@ -38,12 +38,12 @@ assert.doesNotMatch(await read("desktop/frontend/backend.js"), /localStorage|ses
 // Exercise the real native bridge, including the credential boundary and SSE API.
 const originalFetch = globalThis.fetch;
 const sent = [], opened = [];
-const origin = "http://tauri.localhost";
 globalThis.window = globalThis;
-globalThis.location = { origin, href: origin + "/dashboard" };
 globalThis.document = { addEventListener() {} };
 globalThis.open = () => null;
 globalThis.__TAURI__ = { core: { invoke: async (command, args) => command === "backend_config" ? { backendUrl: "http://127.0.0.1:20128", adminToken: "fixture-admin-token" } : opened.push(args.url) } };
+for (const origin of ["http://tauri.localhost", "tauri://localhost"]) {
+globalThis.location = { origin, href: origin + "/index.html" };
 globalThis.fetch = async (input, options) => {
   sent.push({ url: String(input), headers: new Headers(options?.headers) });
   return new Response('{}', { headers: { "Content-Type": "application/json" } });
@@ -58,6 +58,7 @@ await fetch("/i18n/literals/en.json");
 assert.equal(sent.at(-1).headers.get("Authorization"), null);
 await fetch("/v1/models", { headers: { Authorization: "Bearer client-key" } });
 assert.equal(sent.at(-1).headers.get("Authorization"), "Bearer client-key");
+}
 window.open("https://provider.example/authorize", "_blank");
 await Promise.resolve();
 assert.deepEqual(opened, ["https://provider.example/authorize"]);

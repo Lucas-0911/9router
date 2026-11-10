@@ -11,6 +11,7 @@ import { resolveProviderAlias, parseModel, getModelInfoCore } from '../../open-s
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = join(root, 'desktop');
+const checking = process.argv.includes('--check');
 async function files(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const groups = await Promise.all(entries.map(entry => {
@@ -53,7 +54,8 @@ const pages = (await files(join(root, 'src/app'))).filter(p => /^page\.[jt]sx?$/
   .map(p => portable(relative(root, p)));
 const manifest = {
   upstream: 'https://github.com/decolua/9router',
-  revision: execFileSync('git', ['rev-parse', 'upstream/master'], { cwd: root, encoding: 'utf8' }).trim(),
+  revision: checking ? JSON.parse(await readFile(join(output, 'upstream-contract.json'), 'utf8')).revision
+    : execFileSync('git', ['rev-parse', 'upstream/master'], { cwd: root, encoding: 'utf8' }).trim(),
   schemaVersion: SCHEMA_VERSION, schemaSha256: sha(schema), tables,
   columns: Object.fromEntries(Object.entries(TABLES).map(([name, definition]) => [name, Object.keys(definition.columns)])),
   providerAliases,

@@ -11,9 +11,10 @@ export async function connectBackend() {
   globalThis.__9routerBackendOrigin = backend.origin;
   globalThis.__9routerBackendLocation = { hostname: backend.hostname, port: backend.port, protocol: backend.protocol };
   const nativeFetch = window.fetch.bind(window);
+  const appLocation = new URL(window.location.href);
   const apiUrl = (input) => {
     const url = new URL(input instanceof Request ? input.url : input, window.location.href);
-    return [globalThis.location.origin, backend.origin].includes(url.origin) && /^\/(api(?:\/|$)|v1(?:\/|$)|health$)/.test(url.pathname)
+    return ((url.protocol === appLocation.protocol && url.host === appLocation.host) || url.origin === backend.origin) && /^\/(api(?:\/|$)|v1(?:\/|$)|health$)/.test(url.pathname)
       ? new URL(url.pathname + url.search, backend.origin) : null;
   };
   const pendingCallbacks = new Set();

@@ -48,7 +48,7 @@ function App() {
   const [authError, setAuthError] = useState(null);
   const dashboard = pathname.startsWith("/dashboard");
   useEffect(() => {
-    if (pathname === "/") { navigate("/dashboard", { replace: true }); return; }
+    if (pathname === "/" || pathname === "/index.html") { navigate("/dashboard", { replace: true }); return; }
     if (!dashboard) return;
     let active = true;
     fetch("/api/auth/status", { cache: "no-store" }).then(async (response) => {

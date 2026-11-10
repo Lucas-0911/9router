@@ -92,6 +92,8 @@ try {
     const stream = url.pathname.endsWith("/stream");
     await route.fulfill({ status: 200, headers: { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-headers": "authorization,content-type", "content-type": stream ? "text/event-stream" : "application/json" }, body: stream ? `data: ${JSON.stringify(fixtureBody(url))}\n\n` : JSON.stringify(fixtureBody(url, route.request().method())) });
   });
+  await page.goto(origin + "/index.html");
+  await page.waitForURL("**/dashboard", { timeout: 10000 });
   const manifest = JSON.parse(await fs.readFile(path.join(desktop, "ui/routes.json")));
   const routes = fixture ? manifest.map(({ route }) => route.replace("[toolId]", "claude").replace("[kind]", "image").replace("[id]", route.includes("combo/") ? "muse-web" : "muse-web")) : ["/dashboard/providers", "/dashboard/providers/muse-web", "/dashboard/endpoint", "/dashboard/profile", "/dashboard/combos"];
   const results = [];

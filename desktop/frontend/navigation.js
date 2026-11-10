@@ -7,7 +7,8 @@ const subscribe = (listener) => {
 };
 export function navigate(href, { replace = false, scroll = true } = {}) {
   const url = new URL(href, window.location.href);
-  if (url.origin !== globalThis.location.origin) return window.open(url.href, "_blank");
+  const current = new URL(window.location.href);
+  if (url.protocol !== current.protocol || url.host !== current.host) return window.open(url.href, "_blank");
   window.history[replace ? "replaceState" : "pushState"]({}, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));
   if (scroll) window.scrollTo(0, 0);
