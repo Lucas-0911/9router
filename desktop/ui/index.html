@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>9Router</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Đến nội dung chính</a>
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">9</span><span>9Router<small>RUST DESKTOP · ALPHA</small></span></div>
+    <nav aria-label="Điều hướng chính">
+      <button type="button" data-page="overview" aria-current="page">Tổng quan</button>
+      <button type="button" data-page="connections">Kết nối</button>
+      <button type="button" data-page="models">Mô hình</button>
+      <button type="button" data-page="combos">Combo</button>
+      <button type="button" data-page="aliases">Bí danh</button>
+      <button type="button" data-page="keys">Khóa API</button>
+      <button type="button" data-page="chat">Thử hội thoại</button>
+      <button type="button" data-page="settings">Cài đặt</button>
+    </nav>
+    <div class="sidebar-footer"><span id="runtime-state">Đang kết nối…</span><small>Chạy cục bộ trên máy của bạn</small></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="page-header"><div><p class="eyebrow">KHÔNG GIAN LÀM VIỆC</p><h1 id="page-title">Tổng quan</h1></div><button id="refresh" class="secondary" type="button">Làm mới</button></header>
+    <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+    <section data-panel="overview" aria-label="Tổng quan">
+      <div class="welcome"><div><span class="badge">BẢN XEM TRƯỚC NATIVE</span><h2>Một địa chỉ cho các mô hình của bạn.</h2><p>Kết nối nhà cung cấp, đặt bí danh và gọi API từ ứng dụng yêu thích.</p></div><div class="router-glyph" aria-hidden="true">↗<br>→ 9 →<br>↘</div></div>
+      <div class="metrics"><div><span>Kết nối đã lưu</span><strong id="connection-count">—</strong></div><div><span>Mô hình khả dụng</span><strong id="model-count">—</strong></div><div><span>Combo đã lưu</span><strong id="combo-count">—</strong></div></div>
+      <div class="card"><h2>Endpoint cục bộ</h2><p>Dùng địa chỉ này với một khóa API do bạn tạo ở mục Khóa API.</p><div class="copy-row"><code id="endpoint">Đang khởi động…</code><button id="copy-endpoint" class="secondary" type="button">Sao chép</button></div><dl class="facts"><div><dt>Phiên bản</dt><dd id="version">—</dd></div><div><dt>Trạng thái</dt><dd id="health">Đang kiểm tra…</dd></div></dl></div>
+      <div class="callout"><h2>Phạm vi bản Rust hiện tại</h2><p>Vận chuyển API key cùng giao thức. Danh mục nhà cung cấp được giữ để tham chiếu; OAuth, cookie web và chuyển đổi chéo giao thức chưa được chuyển đầy đủ. Combo và bí danh được lưu cục bộ.</p><p id="implemented-detail"></p></div>
+    </section>
+    <section data-panel="connections" aria-label="Kết nối" hidden>
+      <p class="intro">Lưu API key của nhà cung cấp. Chỉ các kết nối API key có transport được hỗ trợ mới gửi được yêu cầu.</p>
+      <form id="connection-form" class="card form-grid">
+        <h2 class="full">Thêm kết nối</h2>
+        <label>Nhà cung cấp<select id="connection-provider" name="provider" required><option value="">Đang tải…</option></select></label>
+        <label>Tên gợi nhớ<input name="name" required maxlength="120" placeholder="Ví dụ: OpenAI cá nhân"></label>
+        <label class="full">API key<input name="apiKey" type="password" required autocomplete="off" spellcheck="false" placeholder="Khóa được lưu trong cơ sở dữ liệu cục bộ"></label>
+        <label>Base URL tùy chọn<input name="baseUrl" type="url" placeholder="https://api.example.com/v1" spellcheck="false"><small>Chỉ dùng URL tin cậy; khóa sẽ được gửi đến đây.</small></label>
+        <label>Độ ưu tiên<input name="priority" type="number" min="0" max="100000" step="1" value="0" required></label>
+        <div class="full form-footer"><span>Không hỗ trợ đăng nhập OAuth ở màn hình này.</span><button type="submit">Lưu kết nối</button></div>
+      </form>
+      <div class="section-heading"><h2>Kết nối của bạn</h2><span id="connection-total" class="muted"></span></div><div id="connection-list" class="record-list"></div>
+    </section>
+    <section data-panel="models" aria-label="Mô hình" hidden>
+      <p class="intro">Danh sách mà endpoint <code>/v1/models</code> hiện công bố. Tính khả dụng thực tế phụ thuộc kết nối và giao thức.</p>
+      <label class="search">Tìm mô hình<input id="model-search" type="search" placeholder="Tên mô hình hoặc nhà cung cấp…"></label>
+      <div class="card table-wrap"><table><thead><tr><th scope="col">Model ID</th><th scope="col">Nhà cung cấp</th></tr></thead><tbody id="model-list"></tbody></table><p id="model-empty" class="empty" hidden>Chưa có mô hình phù hợp.</p></div>
+      <details class="card"><summary>Danh mục nhà cung cấp tham chiếu</summary><p>Xuất hiện trong danh mục không có nghĩa là adapter đã được chuyển sang Rust.</p><div id="provider-catalog" class="catalog"></div></details>
+    </section>
+    <section data-panel="combos" aria-label="Combo" hidden>
+      <p class="intro">Nhóm nhiều model ID theo thứ tự ưu tiên để dự phòng khi yêu cầu thất bại.</p>
+      <form id="combo-form" class="card form-grid"><h2 class="full">Tạo combo</h2><label class="full">Tên combo<input name="name" required pattern="[A-Za-z0-9_-]+" maxlength="120" placeholder="coding-fallback"><small>Chữ, số, dấu gạch ngang hoặc gạch dưới.</small></label><label class="full">Model ID, mỗi dòng một mục<textarea name="models" rows="4" required placeholder="openai/gpt-4.1&#10;anthropic/claude-sonnet-4"></textarea></label><div class="full form-footer"><span>Dùng model ID đúng giao thức với ứng dụng gọi.</span><button type="submit">Tạo combo</button></div></form><h2>Combo đã lưu</h2><div id="combo-list" class="record-list"></div>
+    </section>
+    <section data-panel="aliases" aria-label="Bí danh" hidden>
+      <p class="intro">Gán một tên ngắn cho model ID. Mỗi dòng có dạng <code>bí-danh = nhà-cung-cấp/model</code>.</p>
+      <form id="alias-form" class="card"><label>Bảng bí danh<textarea id="alias-editor" name="aliases" rows="12" spellcheck="false" placeholder="fast = openai/gpt-4.1-mini"></textarea></label><div class="form-footer"><span>Lưu sẽ thay thế toàn bộ bảng bí danh.</span><button type="submit">Lưu bí danh</button></div></form>
+    </section>
+    <section data-panel="keys" aria-label="Khóa API" hidden>
+      <p class="intro">Cấp khóa cho ứng dụng gọi router cục bộ. Không dùng khóa quản trị của giao diện trong ứng dụng khác.</p>
+      <form id="key-form" class="card inline-form"><label>Tên khóa<input name="name" required maxlength="120" placeholder="Ví dụ: Cursor trên máy này"></label><button type="submit">Tạo khóa</button></form>
+      <div id="new-key" class="callout" hidden><h2>Khóa vừa tạo</h2><p>Sao chép và giữ ở nơi an toàn. Khóa chỉ hiện trong phiên này.</p><div class="copy-row"><input id="new-key-value" type="password" readonly aria-label="Khóa API vừa tạo" autocomplete="off"><button id="copy-key" type="button">Sao chép</button><button id="dismiss-key" class="secondary" type="button">Ẩn khóa</button></div></div>
+      <h2>Khóa đã cấp</h2><div id="key-list" class="record-list"></div>
+    </section>
+    <section data-panel="chat" aria-label="Thử hội thoại" hidden>
+      <p class="intro">Gửi một yêu cầu OpenAI Chat Completions qua router. Nội dung sẽ được gửi tới nhà cung cấp đã cấu hình và có thể tính phí.</p>
+      <form id="chat-form" class="card"><label>Model ID, combo hoặc bí danh<input name="model" list="model-options" required placeholder="openai/gpt-4.1-mini" spellcheck="false"></label><datalist id="model-options"></datalist><label>Nội dung<textarea name="prompt" required rows="5" maxlength="100000" placeholder="Hãy giới thiệu ngắn về bạn."></textarea></label><div class="form-footer"><span id="chat-state">Yêu cầu không streaming.</span><div class="button-group"><button id="chat-cancel" class="secondary" type="button" hidden>Hủy</button><button type="submit">Gửi thử</button></div></div></form>
+      <div class="card"><h2>Phản hồi</h2><pre id="chat-output" class="chat-output" tabindex="0">Phản hồi sẽ xuất hiện ở đây.</pre><p id="chat-usage" class="muted"></p></div>
+    </section>
+    <section data-panel="settings" aria-label="Cài đặt" hidden>
+      <p class="intro">Cấu hình được lưu cục bộ, kể cả các tính năng đang được chuyển đổi. Xem phạm vi hỗ trợ ở Tổng quan trước khi bật một tính năng.</p>
+      <form id="settings-form" class="card"><label>Cấu hình JSON<textarea id="settings-editor" name="settings" rows="16" spellcheck="false" required></textarea></label><p class="muted">Giữ lại các thuộc tính chưa hiểu. Chỉ nhập đối tượng JSON hợp lệ.</p><div class="form-footer"><span>Không nhập mật khẩu hoặc API key vào cấu hình chung.</span><button type="submit">Lưu cài đặt</button></div></form>
+    </section>
+    <footer class="workspace-footer">9Router Rust · Dữ liệu trên máy, yêu cầu tới nhà cung cấp bạn chọn.</footer>
+  </main>
+  <dialog id="delete-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Xóa mục này?</h2><p id="delete-description"></p><div class="dialog-actions"><button value="cancel" class="secondary">Giữ lại</button><button value="delete" class="danger">Xóa</button></div></form></dialog>
+</body>
+</html>

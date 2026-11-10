@@ -1,6 +1,11 @@
-//! Native persistence and immutable reference catalog for the 9Router migration.
+//! Native persistence, routing, protocols and desktop runtime for the 9Router migration.
 //! Provider metadata is a reference, not a claim that its adapter has been ported.
+#[cfg(feature = "desktop-app")]
+pub mod desktop;
+pub mod entities;
+pub mod http;
 pub mod model;
+pub mod protocol;
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension,
     backup::{Backup, StepResult},
@@ -19,7 +24,7 @@ use std::{
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct Provider {
     pub id: String,
     pub alias: String,
@@ -29,6 +34,8 @@ pub struct Provider {
     #[serde(rename = "serviceKinds")]
     pub service_kinds: Vec<String>,
     pub format: Option<String>,
+    #[serde(default)]
+    pub transport: Option<Value>,
 }
 
 #[derive(Deserialize)]

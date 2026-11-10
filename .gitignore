@@ -107,3 +107,5 @@ debug.log
 /desktop/target/
 /desktop/.data/
 /desktop/.cargo-home/
+/desktop/.npm-cache/
+/desktop/gen/

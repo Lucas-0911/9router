@@ -21,6 +21,9 @@ async function files(directory) {
 }
 const sha = data => createHash('sha256').update(data).digest('hex');
 const portable = path => path.split(sep).join('/');
+const executorSource = await readFile(join(root, 'open-sse/executors/index.js'), 'utf8');
+const specialExecutors = new Set([...executorSource.split('const executors = {')[1].split('\n};')[0]
+  .matchAll(/^\s*["']?([\w-]+)["']?: new /gm)].map(match => match[1]));
 const apiFiles = (await files(join(root, 'src/app/api'))).filter(p => basename(p) === 'route.js');
 const routes = await Promise.all(apiFiles.map(async path => {
   const text = await readFile(path, 'utf8');
@@ -32,6 +35,11 @@ const providers = registry.map(provider => ({
   name: provider.display?.name ?? provider.id, category: provider.category,
   serviceKinds: provider.serviceKinds ?? [],
   format: provider.transport ? provider.transport.format ?? 'openai' : null,
+  transport: provider.transport ? {
+    ...Object.fromEntries(['baseUrl', 'urlSuffix', 'headers', 'auth', 'forceStream']
+      .filter(key => provider.transport[key] !== undefined).map(key => [key, provider.transport[key]])),
+    executor: specialExecutors.has(provider.id) ? 'specialized' : 'default',
+  } : null,
   models: (provider.models ?? []).map(normalizeModel),
 })).sort((a, b) => a.id.localeCompare(b.id, 'en'));
 assert.equal(new Set(providers.map(p => p.id)).size, providers.length, 'Duplicate provider IDs');

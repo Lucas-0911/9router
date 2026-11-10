@@ -40,3 +40,31 @@ selected accounts; credentials must never be copied into the fork or logs.
 The initial native crate below is a migration foundation, not a release or a
 feature-complete replacement. The existing MuseRouter installers are unrelated
 to this project and must not be presented as 9Router Rust builds.
+
+## Native desktop/runtime checkpoint
+
+The library now has an executable Axum gateway and optional Tauri desktop
+window. Native entity CRUD, app-side alias/custom-node/combo precedence,
+generic API-key transports, same-protocol SSE cancellation/backpressure,
+priority account/model fallback and restricted client keys are implemented.
+Non-streaming Chat/Claude/Gemini conversion covers the fixture-tested subset;
+Responses currently passes through only to Responses-capable upstreams.
+The desktop has eight functional views and native-host packaging scripts plus
+macOS/Windows/Linux CI jobs. Build artifacts remain preview builds.
+
+The full scope is still mandatory. In particular, the following remain open:
+
+- OAuth/device/browser login, token refresh, every specialized executor and
+  authenticated verification for every registered provider.
+- Full protocol parity, cross-protocol SSE, Responses conversion, provider
+  quirks, quota and usage recording/pricing, account/combination strategies.
+- Media, RTK/token savers, outbound proxy transports/pools, tunnels/MITM,
+  cloud sync, MCP, CLI integrations, plugins, SSO and update services.
+- All remaining upstream management endpoints and UI route features; arbitrary
+  settings can be stored but that does not activate an unported subsystem.
+- Distribution signing/notarization and installation/runtime verification on
+  every shipped target architecture.
+
+Do not describe this checkpoint as a complete Rust replacement. Unsupported
+credential/proxy adapters reject inference before network dispatch, and
+cross-protocol streaming rejects before returning SSE headers.
