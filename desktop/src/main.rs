@@ -124,7 +124,7 @@ fn run() -> Result<()> {
         Store::create(&database)?
     };
     let token = admin_token(&directory)?;
-    let state = Gateway::new(store, token.clone())?;
+    let state = Gateway::new_in(store, token.clone(), directory.clone())?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -133,6 +133,7 @@ fn run() -> Result<()> {
     println!("9Router Rust {} — {url}/v1", env!("CARGO_PKG_VERSION"));
     println!("Data: {}", directory.display());
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let workers = state.clone();
     let server = runtime.spawn(async move {
         axum::serve(listener, http::router(state))
             .with_graceful_shutdown(async {
@@ -155,6 +156,7 @@ fn run() -> Result<()> {
         }
     };
     let _ = stop.send(());
+    runtime.block_on(workers.shutdown());
     runtime.block_on(async {
         let mut server = server;
         match tokio::time::timeout(Duration::from_secs(3), &mut server).await {

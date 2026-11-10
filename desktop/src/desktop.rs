@@ -25,6 +25,43 @@ fn backend_config(
     Ok(state.inner().clone())
 }
 
+#[tauri::command]
+async fn open_external(window: WebviewWindow, url: String) -> std::result::Result<(), String> {
+    if window.label() != "main" || !window.url().is_ok_and(|u| is_app_url(&u)) {
+        return Err("Only the local application may open a login page".into());
+    }
+    let parsed = Url::parse(&url).map_err(|_| "Invalid browser URL")?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || url.len() > 16384
+    {
+        return Err("Browser links must use HTTPS without embedded credentials".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("/usr/bin/open");
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            let mut c = std::process::Command::new("rundll32");
+            c.arg("url.dll,FileProtocolHandler");
+            c
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let mut command = std::process::Command::new("xdg-open");
+        command
+            .arg(parsed.as_str())
+            .status()
+            .map_err(|_| "Cannot open the default browser".to_owned())?
+            .success()
+            .then_some(())
+            .ok_or_else(|| "The default browser could not open this page".to_owned())
+    })
+    .await
+    .map_err(|_| "Browser launch failed".to_owned())?
+}
+
 /// Call on the main thread after starting the backend on a background runtime.
 pub fn run(backend_url: String, admin_token: String) -> crate::Result<()> {
     let url = Url::parse(&backend_url)?;
@@ -48,7 +85,7 @@ pub fn run(backend_url: String, admin_token: String) -> crate::Result<()> {
             backend_url: backend_url.trim_end_matches('/').to_owned(),
             admin_token,
         })
-        .invoke_handler(tauri::generate_handler![backend_config])
+        .invoke_handler(tauri::generate_handler![backend_config, open_external])
         .setup(|app| {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("9Router")

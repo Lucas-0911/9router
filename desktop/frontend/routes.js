@@ -1,0 +1,33 @@
+// Generated from every original src/app page by build.mjs.
+import { lazy } from "react";
+import { MachinePage } from "./app";
+export const routes = [
+  { route: "/dashboard/media-providers/web", pattern: new RegExp("^/dashboard/media-providers/web/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/media-providers/web/page.js")) },
+  { route: "/dashboard/settings/pricing", pattern: new RegExp("^/dashboard/settings/pricing/?$"), page: lazy(() => import("@/app/dashboard/settings/pricing/page.js")) },
+  { route: "/dashboard/providers/new", pattern: new RegExp("^/dashboard/providers/new/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/providers/new/page.js")) },
+  { route: "/dashboard/console-log", pattern: new RegExp("^/dashboard/console-log/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/console-log/page.js")) },
+  { route: "/dashboard/proxy-pools", pattern: new RegExp("^/dashboard/proxy-pools/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/proxy-pools/page.js")) },
+  { route: "/dashboard/token-saver", pattern: new RegExp("^/dashboard/token-saver/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/token-saver/page.js")) },
+  { route: "/dashboard/basic-chat", pattern: new RegExp("^/dashboard/basic-chat/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/basic-chat/page.js")) },
+  { route: "/dashboard/translator", pattern: new RegExp("^/dashboard/translator/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/translator/page.js")) },
+  { route: "/dashboard/cli-tools", pattern: new RegExp("^/dashboard/cli-tools/?$"), page: () => <MachinePage tool={true} /> },
+  { route: "/dashboard/providers", pattern: new RegExp("^/dashboard/providers/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/providers/page.js")) },
+  { route: "/dashboard/endpoint", pattern: new RegExp("^/dashboard/endpoint/?$"), page: () => <MachinePage tool={false} /> },
+  { route: "/dashboard/profile", pattern: new RegExp("^/dashboard/profile/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/profile/page.js")) },
+  { route: "/dashboard/combos", pattern: new RegExp("^/dashboard/combos/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/combos/page.js")) },
+  { route: "/dashboard/pxpipe", pattern: new RegExp("^/dashboard/pxpipe/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/pxpipe/page.js")) },
+  { route: "/dashboard/skills", pattern: new RegExp("^/dashboard/skills/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/skills/page.js")) },
+  { route: "/dashboard/quota", pattern: new RegExp("^/dashboard/quota/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/quota/page.js")) },
+  { route: "/dashboard/usage", pattern: new RegExp("^/dashboard/usage/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/usage/page.js")) },
+  { route: "/dashboard/mitm", pattern: new RegExp("^/dashboard/mitm/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/mitm/page.js")) },
+  { route: "/dashboard", pattern: new RegExp("^/dashboard/?$"), page: () => <MachinePage tool={false} /> },
+  { route: "/callback", pattern: new RegExp("^/callback/?$"), page: lazy(() => import("@/app/callback/page.js")) },
+  { route: "/landing", pattern: new RegExp("^/landing/?$"), page: lazy(() => import("@/app/landing/page.js")) },
+  { route: "/login", pattern: new RegExp("^/login/?$"), page: lazy(() => import("@/app/login/page.js")) },
+  { route: "/", pattern: new RegExp("^//?$"), page: lazy(() => import("@/app/page.js")) },
+  { route: "/dashboard/media-providers/combo/[id]", pattern: new RegExp("^/dashboard/media-providers/combo/[^/]+/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/media-providers/combo/[id]/page.js")) },
+  { route: "/dashboard/media-providers/[kind]", pattern: new RegExp("^/dashboard/media-providers/[^/]+/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/media-providers/[kind]/page.js")) },
+  { route: "/dashboard/cli-tools/[toolId]", pattern: new RegExp("^/dashboard/cli-tools/[^/]+/?$"), page: () => <MachinePage tool={true} /> },
+  { route: "/dashboard/providers/[id]", pattern: new RegExp("^/dashboard/providers/[^/]+/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/providers/[id]/page.js")) },
+  { route: "/dashboard/media-providers/[kind]/[id]", pattern: new RegExp("^/dashboard/media-providers/[^/]+/[^/]+/?$"), page: lazy(() => import("@/app/(dashboard)/dashboard/media-providers/[kind]/[id]/page.js")) },
+];

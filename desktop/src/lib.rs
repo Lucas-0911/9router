@@ -1,11 +1,15 @@
 //! Native persistence, routing, protocols and desktop runtime for the 9Router migration.
 //! Provider metadata is a reference, not a claim that its adapter has been ported.
+pub mod codex;
 #[cfg(feature = "desktop-app")]
 pub mod desktop;
 pub mod entities;
 pub mod http;
 pub mod model;
+mod muse;
+pub mod oauth;
 pub mod protocol;
+pub mod web_login;
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension,
     backup::{Backup, StepResult},
@@ -226,6 +230,28 @@ impl Store {
             .optional()?;
         // Corrupt JSON is reported and preserved, never replaced with an empty default.
         Ok(raw.map(|text| serde_json::from_str(&text)).transpose()?)
+    }
+
+    pub fn scope(&self, scope: &str) -> Result<BTreeMap<String, Value>> {
+        let mut query = self
+            .connection
+            .prepare("SELECT key,value FROM kv WHERE scope=?1 ORDER BY key")?;
+        let rows = query.query_map([scope], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.map(|row| {
+            let (key, raw) = row?;
+            Ok((key, serde_json::from_str(&raw)?))
+        })
+        .collect()
+    }
+
+    pub fn remove(&mut self, scope: &str, key: &str) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM kv WHERE scope=?1 AND key=?2",
+            params![scope, key],
+        )?;
+        Ok(())
     }
 
     pub fn put_batch(&mut self, values: &[(&str, &str, &Value)]) -> Result<()> {

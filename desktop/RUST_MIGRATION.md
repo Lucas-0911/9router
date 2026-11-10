@@ -41,30 +41,43 @@ The initial native crate below is a migration foundation, not a release or a
 feature-complete replacement. The existing MuseRouter installers are unrelated
 to this project and must not be presented as 9Router Rust builds.
 
-## Native desktop/runtime checkpoint
+## Original dashboard and native login checkpoint (alpha.2)
 
-The library now has an executable Axum gateway and optional Tauri desktop
-window. Native entity CRUD, app-side alias/custom-node/combo precedence,
-generic API-key transports, same-protocol SSE cancellation/backpressure,
-priority account/model fallback and restricted client keys are implemented.
-Non-streaming Chat/Claude/Gemini conversion covers the fixture-tested subset;
-Responses currently passes through only to Responses-capable upstreams.
-The desktop has eight functional views and native-host packaging scripts plus
-macOS/Windows/Linux CI jobs. Build artifacts remain preview builds.
+All 28 original page routes now use the original React components and styles,
+including OAuthModal and WebLoginButton. The static bundle contains local fonts,
+icons and Monaco; no Node sidecar is packaged. Muse Web already exists in this
+upstream revision, so its provider ID and original login screen are reused.
 
-The full scope is still mandatory. In particular, the following remain open:
+Native Rust now implements browser capture for all six original web-login
+providers with app-owned Chrome profiles, domain-bound cookies and cancellation.
+Common OAuth authorization/PKCE/device-code flows, loopback callbacks, private
+token persistence and refresh are implemented. Codex native Responses and the
+bounded non-streaming Chat conversion, Gemini CLI envelopes and generic OAuth
+transports can dispatch saved login credentials. Muse chat and image/video use
+the original browser DOM expressions from Rust through CDP; input images and
+downloads are bounded. Browser-side expressions are not a Node backend.
 
-- OAuth/device/browser login, token refresh, every specialized executor and
-  authenticated verification for every registered provider.
-- Full protocol parity, cross-protocol SSE, Responses conversion, provider
-  quirks, quota and usage recording/pricing, account/combination strategies.
-- Media, RTK/token savers, outbound proxy transports/pools, tunnels/MITM,
-  cloud sync, MCP, CLI integrations, plugins, SSO and update services.
-- All remaining upstream management endpoints and UI route features; arbitrary
-  settings can be stored but that does not activate an unported subsystem.
-- Distribution signing/notarization and installation/runtime verification on
-  every shipped target architecture.
+Native SQLite/entity APIs, model resolution, aliases/combos, keys, custom/disabled
+models, provider overrides, proxy-pool records and core settings are implemented.
+The model resolver is checked against 1,174 upstream inputs. Same-protocol SSE
+retains cancellation/backpressure. Differential snapshots pin source contracts.
+Browser smoke checks all 28 routes against fixtures and five core screens against
+the real Rust server. These checks establish rendering and selected workflows,
+not full upstream feature parity or real-provider authentication.
 
-Do not describe this checkpoint as a complete Rust replacement. Unsupported
-credential/proxy adapters reject inference before network dispatch, and
-cross-protocol streaming rejects before returning SSE headers.
+The full scope is still mandatory. Remaining work includes:
+
+- Specialized OAuth for Cursor, Zed, Xiaomi, Trae and Windsurf; other specialized
+  inference executors and opt-in authenticated checks for each provider.
+- Full translator parity and cross-protocol SSE, provider quirks, reactive refresh
+  retries and complete account/combination strategies.
+- Usage/pricing/quota services, non-Muse media, RTK, outbound proxy transports,
+  tunnels/MITM, cloud sync, MCP, CLI integrations, plugins, SSO and updates.
+- Backend contracts for the remaining management actions. A screen rendering
+  successfully does not establish that every button/service is implemented.
+- Distribution signing/notarization and installation/runtime checks for every
+  target architecture. Native CI build success alone is not installation proof.
+
+Unsupported credential/proxy adapters reject before network dispatch. Unported
+stream conversions reject before SSE headers. Do not call this checkpoint a
+feature-complete Rust replacement.

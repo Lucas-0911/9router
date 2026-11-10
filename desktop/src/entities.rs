@@ -243,6 +243,75 @@ fn string_list(value: &Value) -> Result<Vec<String>> {
 }
 
 impl Store {
+    pub fn proxy_pools(&self) -> Result<Vec<Value>> {
+        let mut query=self.connection.prepare("SELECT id,isActive,testStatus,data,createdAt,updatedAt FROM proxyPools ORDER BY updatedAt DESC,id")?;
+        let rows = query.query_map([], |row| {
+            let mut value = Value::Object(object_column(row, 3)?);
+            value["id"] = json!(row.get::<_, String>(0)?);
+            value["isActive"] = json!(row.get::<_, bool>(1)?);
+            value["testStatus"] = json!(row.get::<_, Option<String>>(2)?);
+            value["createdAt"] = json!(row.get::<_, String>(4)?);
+            value["updatedAt"] = json!(row.get::<_, String>(5)?);
+            Ok(value)
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn save_proxy_pool(&mut self, input: &Value) -> Result<Value> {
+        let patch = object(input)?;
+        let id = patch
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        bounded(&id, 256, false)?;
+        let existing = self
+            .proxy_pools()?
+            .into_iter()
+            .find(|p| p["id"] == id)
+            .map(|v| object(&v))
+            .transpose()?
+            .unwrap_or_default();
+        let mut value = merge_record(existing, patch, &id, &now(&self.connection)?)?;
+        text_field(&value, "name", true, 1024)?;
+        text_field(&value, "proxyUrl", true, 8192)?;
+        let url = reqwest::Url::parse(value["proxyUrl"].as_str().unwrap())
+            .map_err(|_| invalid("Invalid proxy URL"))?;
+        if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
+            || url.host_str().is_none()
+        {
+            return Err(invalid("Invalid proxy protocol"));
+        }
+        value.entry("isActive").or_insert(json!(true));
+        value.entry("type").or_insert(json!("http"));
+        value.entry("testStatus").or_insert(json!("unknown"));
+        value.entry("noProxy").or_insert(json!(""));
+        value.entry("strictProxy").or_insert(json!(false));
+        bool_field(&value, "isActive")?;
+        bool_field(&value, "strictProxy")?;
+        let data = extra_data(
+            &value,
+            &["id", "isActive", "testStatus", "createdAt", "updatedAt"],
+        )?;
+        self.connection.execute("INSERT INTO proxyPools(id,isActive,testStatus,data,createdAt,updatedAt) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET isActive=excluded.isActive,testStatus=excluded.testStatus,data=excluded.data,updatedAt=excluded.updatedAt",params![id,value["isActive"].as_bool(),value["testStatus"].as_str(),data,value["createdAt"].as_str(),value["updatedAt"].as_str()])?;
+        Ok(Value::Object(value))
+    }
+
+    pub fn delete_proxy_pool(&mut self, id: &str) -> Result<bool> {
+        bounded(id, 256, false)?;
+        if self
+            .connections(None)?
+            .iter()
+            .any(|c| c["providerSpecificData"]["proxyPoolId"] == id)
+        {
+            return Err(invalid("Proxy pool is still bound to a connection"));
+        }
+        Ok(self
+            .connection
+            .execute("DELETE FROM proxyPools WHERE id=?1", [id])?
+            > 0)
+    }
+
     /// Lists every connection, including disabled entries. SQL columns override JSON copies.
     pub fn connections(&self, provider: Option<&str>) -> Result<Vec<Value>> {
         if let Some(provider) = provider {

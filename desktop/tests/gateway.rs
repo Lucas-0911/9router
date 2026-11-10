@@ -22,6 +22,91 @@ use std::{
     time::Duration,
 };
 
+#[tokio::test]
+async fn web_oauth_accounts_dispatch_without_api_keys_and_google_envelopes_are_unwrapped() {
+    let fixture=Router::new().route("/codex/responses",post(|headers:HeaderMap,axum::Json(body):axum::Json<Value>|async move {
+        assert_eq!(headers["authorization"],"Bearer codex-login-token");
+        assert_eq!(headers["chatgpt-account-id"],"fixture-account");
+        assert_eq!(body["stream"],true);
+        assert_eq!(body["store"],false);
+        assert!(body["input"].is_array());
+        let completed=json!({"type":"response.completed","response":{"id":"resp_fixture","status":"completed","model":"gpt-5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OAuth accepted","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":2}}});
+        ([("content-type","text/event-stream")],format!("event: response.completed\r\ndata: {completed}\r\n\r\n"))
+    })).route("/v1internal:generateContent",post(|headers:HeaderMap,axum::Json(body):axum::Json<Value>|async move {
+        assert_eq!(headers["authorization"],"Bearer google-login-token");
+        assert_eq!(body["project"],"fixture-project");
+        assert_eq!(body["model"],"gemini-2.5-flash");
+        assert!(body["request"]["contents"].is_array());
+        axum::Json(json!({"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Web login works"}]},"finishReason":"STOP"}]}}))
+    })).route("/v1internal:streamGenerateContent",post(|headers:HeaderMap|async move {
+        assert_eq!(headers["authorization"],"Bearer google-login-token");
+        let event=format!("data: {}\r\n\r\n",json!({"response":{"candidates":[{"content":{"parts":[{"text":"Xin chào"}]}}]}}));
+        ([("content-type","text/event-stream")],Body::from_stream(stream::iter(event.as_bytes().chunks(2).map(|b|Ok::<_,Infallible>(Bytes::copy_from_slice(b))).collect::<Vec<_>>())))
+    })).route("/v1/messages",post(|headers:HeaderMap|async move {
+        assert_eq!(headers["authorization"],"Bearer claude-login-token");assert!(!headers.contains_key("x-api-key"));
+        axum::Json(json!({"id":"msg_test","type":"message","role":"assistant","content":[{"type":"text","text":"OAuth accepted"}],"model":"claude-sonnet-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}))
+    }));
+    let (upstream, fixture_task) = serve(fixture).await;
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = store_at(&temp);
+    store.save_connection(&json!({"provider":"gemini-cli","authType":"oauth","accessToken":"google-login-token","projectId":"fixture-project","providerSpecificData":{"baseUrl":format!("{upstream}/v1internal")}})).unwrap();
+    store.save_connection(&json!({"provider":"claude","authType":"oauth","accessToken":"claude-login-token","providerSpecificData":{"baseUrl":format!("{upstream}/v1")}})).unwrap();
+    store.save_connection(&json!({"provider":"codex","authType":"oauth","accessToken":"codex-login-token","providerSpecificData":{"baseUrl":format!("{upstream}/codex/responses"),"chatgptAccountId":"fixture-account"}})).unwrap();
+    let (base, server) = serve(router(Gateway::new(store, ADMIN.into()).unwrap())).await;
+    let client = reqwest::Client::new();
+    for model in ["gc/gemini-2.5-flash", "cc/claude-sonnet-5", "codex/gpt-5"] {
+        let response = client
+            .post(format!("{base}/v1/chat/completions"))
+            .bearer_auth(ADMIN)
+            .json(&json!({"model":model,"messages":[{"role":"user","content":"Hello"}]}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(status, 200, "{body}");
+        assert!(body["choices"][0]["message"]["content"].is_string());
+    }
+    let response = client
+        .post(format!(
+            "{base}/v1beta/models/gc/gemini-2.5-flash:streamGenerateContent"
+        ))
+        .bearer_auth(ADMIN)
+        .json(&json!({"contents":[{"role":"user","parts":[{"text":"Hello"}]}]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let text = response.text().await.unwrap();
+    assert!(text.contains("Xin chào"));
+    assert!(!text.contains("\"response\""));
+    for stream in [false, true] {
+        let response = client
+            .post(format!("{base}/v1/responses"))
+            .bearer_auth(ADMIN)
+            .json(&json!({"model":"codex/gpt-5","input":"Hello","stream":stream}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        if stream {
+            assert!(
+                response
+                    .text()
+                    .await
+                    .unwrap()
+                    .contains("event: response.completed")
+            );
+        } else {
+            let body: Value = response.json().await.unwrap();
+            assert_eq!(body["status"], "completed");
+            assert_eq!(body["output"][0]["content"][0]["text"], "OAuth accepted");
+        }
+    }
+    server.abort();
+    fixture_task.abort();
+}
+
 const ADMIN: &str = "test-admin-only-012345678901234567890123456789";
 
 async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
@@ -285,7 +370,7 @@ async fn sse_is_byte_preserving_and_unsupported_adapters_do_not_dispatch() {
     let response = client
         .post(format!("{url}/v1/chat/completions"))
         .bearer_auth(ADMIN)
-        .json(&json!({"model":"codex/gpt-5","messages":[]}))
+        .json(&json!({"model":"codex/gpt-5","messages":[],"stream":true}))
         .send()
         .await
         .unwrap();

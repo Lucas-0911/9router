@@ -1,0 +1,31 @@
+{
+  "name": "9router-desktop-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node frontend/build.mjs",
+    "check": "node scripts/check-ui.mjs",
+    "smoke": "node scripts/smoke-ui.mjs"
+  },
+  "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/modifiers": "^9.0.0",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@monaco-editor/react": "^4.7.0",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@xyflow/react": "^12.10.1",
+    "material-symbols": "^0.44.6",
+    "monaco-editor": "^0.57.0",
+    "next": "^16.4.2",
+    "playwright-core": "^1.62.1",
+    "postcss": "^8.5.6",
+    "prop-types": "^15.8.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "recharts": "^3.7.0",
+    "tailwindcss": "^4",
+    "uuid": "^13.0.2",
+    "zustand": "^5.0.10"
+  }
+}

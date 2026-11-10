@@ -1,0 +1,33 @@
+{
+  "AGENT_BUBBLE": "div[class*=\"hatch-agent-bubble-bg\"]",
+  "APPROVAL_CARD": "[data-testid=\"hatch-inline-approval-card\"]",
+  "ATTACHMENT": "[data-testid^=\"hatch-chat-attachment-presentation-\"]",
+  "CHAT_STATE": "(() => {\n  const scrollers = [...document.querySelectorAll('*')].filter(e => {\n    const s = getComputedStyle(e);\n    return (s.overflowY === 'auto' || s.overflowY === 'scroll') && e.scrollHeight > e.clientHeight + 50;\n  });\n  scrollers.forEach(e => { e.scrollTop = e.scrollHeight; });\n  const bubbles = [...document.querySelectorAll(\"div[class*=\\\"hatch-agent-bubble-bg\\\"]\")];\n  const last = bubbles.length ? (bubbles[bubbles.length - 1].innerText || '').trim() : '';\n  const atts = [...document.querySelectorAll(\"[data-testid^=\\\"hatch-chat-attachment-presentation-\\\"]\")].map(a => {\n    const v = a.querySelector('video'), i = a.querySelector('img');\n    const m = v || i;\n    return {\n      tid: a.getAttribute('data-testid') || '',\n      kind: v ? 'video' : (i ? 'image' : 'unknown'),\n      src: m ? (m.currentSrc || m.src || '') : '',\n      w: m ? (m.videoWidth || m.naturalWidth || 0) : 0,\n      h: m ? (m.videoHeight || m.naturalHeight || 0) : 0,\n    };\n  });\n  const tail = document.body ? document.body.innerText.slice(-600) : '';\n  return { agentCount: bubbles.length, lastText: last,\n            generating: !!document.querySelector(\"button[aria-label*=\\\"Stop\\\" i]\"),\n            approval: !!document.querySelector(\"[data-testid=\\\"hatch-inline-approval-card\\\"]\"),\n            attachments: atts, tail };\n})()",
+  "CLICK_SEND": "(() => {\n  const btn = [...document.querySelectorAll('button,[role=button]')]\n    .filter(b => b.offsetParent !== null)\n    .find(b => /send|发送/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-testid') || '')));\n  if (!btn) return 'missing';\n  if (btn.disabled) return 'disabled';\n  btn.click();\n  return 'clicked';\n})()",
+  "DENY_APPROVALS": "(() => {\n  const denied = [];\n  for (const card of document.querySelectorAll(\"[data-testid=\\\"hatch-inline-approval-card\\\"]\")) {\n    const btn = [...card.querySelectorAll('button,[role=button]')]\n      .find(b => /^(deny|decline|reject|don.t allow)$/i.test((b.innerText || '').trim()));\n    if (btn && !btn.disabled) {\n      btn.click();\n      denied.push(card.getAttribute('aria-label') || 'approval request');\n    }\n  }\n  return denied;\n})()",
+  "FILE_INPUT": "input[type=\"file\"]",
+  "INPUT": "textarea",
+  "INPUT_EMPTY": "!(document.querySelector(\"textarea\") || { value: '' }).value",
+  "LAST_BUBBLE_MEDIA": "(() => {\n  const bubbles = [...document.querySelectorAll(\"div[class*=\\\"hatch-agent-bubble-bg\\\"]\")];\n  const b = bubbles.length ? bubbles[bubbles.length - 1] : null;\n  if (!b) return { links: [], html: '' };\n  const urls = [];\n  const push = (u) => { if (u && !urls.includes(u)) urls.push(u); };\n  b.querySelectorAll('video, source').forEach(m => push(m.currentSrc || m.src || ''));\n  b.querySelectorAll('a[href]').forEach(a => push(a.href || ''));\n  b.querySelectorAll('img').forEach(m => push(m.currentSrc || m.src || ''));\n  const text = b.innerText || '';\n  const re = /https?:\\/\\/[^\\s)<>\"']+/g;\n  let mm; while ((mm = re.exec(text))) push(mm[0]);\n  return { links: urls, html: (b.outerHTML || '').slice(0, 2000) };\n})()",
+  "LOGIN_HINTS": [
+    "log in",
+    "sign in",
+    "create an account",
+    "use another account"
+  ],
+  "PAGE_STATE": "(() => {\n  const body = document.body ? document.body.innerText : '';\n  const hydration = document.querySelector('[data-hatch-shell-hydration-state]');\n  return {\n    ready: document.readyState === 'complete' && !!document.querySelector(\"textarea\")\n           && (!hydration || hydration.getAttribute('data-hatch-shell-hydration-state') === 'hydrated')\n           && !body.includes('Connecting...'),\n    hasInput: !!document.querySelector(\"textarea\"),\n    path: location.pathname,\n    head: body.slice(0, 800),\n  };\n})()",
+  "QUOTA_HINTS": [
+    "out of credits",
+    "usage limit",
+    "limit reached",
+    "token limit"
+  ],
+  "STALL_HINTS": [
+    "Still sending",
+    "Connecting..."
+  ],
+  "STOP_BUTTON": "button[aria-label*=\"Stop\" i]",
+  "fillInput": "(() => {\n  const ta = document.querySelector(\"textarea\");\n  if (!ta) return { ok: false, err: 'no-input' };\n  ta.focus();\n  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;\n  setter.call(ta, \"__9ROUTER_TEXT__\");\n  ta.dispatchEvent(new Event('input', { bubbles: true }));\n  return { ok: true, len: ta.value.length };\n})()",
+  "attachFile": "(() => {\n  try {\n    const input = document.querySelector(\"input[type=\\\"file\\\"]\");\n    if (!input) return { ok: false, err: 'no-file-input' };\n    const bin = atob(\"__9ROUTER_BASE64__\");\n    const bytes = new Uint8Array(bin.length);\n    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);\n    const dt = new DataTransfer();\n    dt.items.add(new File([bytes], \"__9ROUTER_FILENAME__\", { type: \"__9ROUTER_MIME__\" }));\n    input.files = dt.files;\n    input.dispatchEvent(new Event('change', { bubbles: true }));\n    return { ok: true };\n  } catch (e) { return { ok: false, err: String(e) }; }\n})()",
+  "fetchMedia": "(async () => {\n  try {\n    const r = await fetch(\"__9ROUTER_URL__\");\n    const b = await r.blob();\n    const buf = new Uint8Array(await b.arrayBuffer());\n    let s = '';\n    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));\n    return { ok: true, mime: b.type || '', b64: btoa(s) };\n  } catch (e) { return { ok: false, err: String(e) }; }\n})()"
+}

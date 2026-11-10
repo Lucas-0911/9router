@@ -1,6 +1,6 @@
 [package]
 name = "nine-router-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -8,13 +8,16 @@ description = "Native Rust backend migration for 9Router"
 
 [dependencies]
 axum = "0.8.9"
+base64 = "0.22"
 futures-util = "0.3.34"
 reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
 rusqlite = { version = "0.40.2", features = ["backup", "bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.10"
 tempfile = "3.27.0"
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "net", "signal", "sync", "time", "macros"] }
+tokio-tungstenite = "0.28"
 uuid = { version = "1.28.0", features = ["v4"] }
 tauri = { version = "2.12.3", optional = true , features = [] }
 

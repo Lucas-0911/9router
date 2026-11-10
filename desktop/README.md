@@ -1,93 +1,88 @@
 # 9Router Rust desktop
 
-Native Rust desktop preview of the 9router 0.5.116 migration. The backend runs
-without Node or Python. This is still an alpha: it does **not** yet preserve
-all upstream features. The full scope remains in [RUST_MIGRATION.md](RUST_MIGRATION.md).
+Desktop alpha based on upstream 9router 0.5.116. The app reuses all 28 original
+page routes, dashboard components, styles, languages and provider login dialogs.
+The packaged backend is Rust; Node is needed only at build time. Full upstream
+feature parity is still pending; see [RUST_MIGRATION.md](RUST_MIGRATION.md).
 
-Implemented:
+## Browser login
 
-- SQLite compatibility with all 11 upstream tables, private files, transactional
-  entity updates, and explicit consistent import including live WAL data.
-- Model/provider resolution, custom nodes, aliases and nested fallback combos.
-  Core model resolution matches 1,174 JavaScript reference inputs.
-- Native Axum HTTP server: OpenAI Chat, Anthropic Messages, Gemini generateContent
-  and native Responses endpoints, with `/api/v1/*` compatibility paths.
-- Generic API-key transports using endpoints/auth descriptors captured from the
-  upstream registry; custom OpenAI/Anthropic-compatible nodes are supported.
-  Specialized executors, OAuth and browser credentials return 501 before dispatch.
-- Priority account fallback, per-account/model cooldown, combo fallback after
-  a model rejection, API-key model/combo restrictions and filtered model lists.
-- Same-protocol SSE streams relay bytes without buffering the entire response;
-  disconnect cancels the upstream read. Cross-protocol streaming returns 501.
-- Non-streaming OpenAI Chat ↔ Claude/Gemini conversion for the tested message,
-  tool, inline-image, reasoning and usage subset. Unsupported fields/signatures
-  fail explicitly; this is not full translator parity.
-- Management APIs for connections, custom nodes, combos, aliases, keys and
-  settings. Provider secrets are omitted from responses; newly generated client
-  keys are returned at creation. Unknown settings are preserved for migration.
-- Tauri desktop window with a Vietnamese dashboard for connections, models,
-  combos, aliases, client keys, test chat and settings. The native IPC bootstrap
-  passes the loopback admin credential in memory. No token is put in a URL or
-  browser storage. This UI covers eight views, not all 28 upstream pages.
+Open **Providers → Muse Web → Login via Browser → Open Browser & Login**.
+Sign in on the provider website in the Chrome/Chromium window opened by the app.
+The Rust backend saves the session privately; no provider API key is required.
+An installed Chrome/Chromium is required for web login and Muse execution.
+`NINEROUTER_BROWSER_BIN` can select the browser executable.
 
-Run from the repository root (Rust + native GUI development prerequisites):
+The same native capture supports the six original web providers. This does not
+mean all six inference executors have been ported: Muse chat/image/video is
+implemented; the other specialized web executors remain pending. Native OAuth
+authorization, PKCE, device-code polling and refresh are implemented for common
+providers. Codex Responses, Gemini CLI and generic OAuth transports are wired to
+inference. Cursor, Zed, Xiaomi, Trae and Windsurf need specialized auth adapters.
+Real-provider authentication and generation require an opt-in account test.
+
+## Build and run
+
+Install Rust, Node 22+ and the native Tauri development prerequisites. Build the
+original frontend once before running the desktop:
 
 ```sh
+npm --prefix desktop ci
+npm --prefix desktop run build
 cargo run --locked --manifest-path desktop/Cargo.toml --features desktop-app -- \
   --data-dir "$PWD/desktop/.data/dev"
 ```
 
-For the HTTP server alone:
+HTTP server only (there is no standalone web dashboard server in this mode):
 
 ```sh
 cargo run --locked --manifest-path desktop/Cargo.toml -- --headless \
   --data-dir "$PWD/desktop/.data/dev" --listen 127.0.0.1:20128
 ```
 
-The default data directory is `~/.9router-rust` (`%LOCALAPPDATA%/.9router-rust`
-on Windows). It is separate from the original `~/.9router`. The local admin
-credential is `DATA_DIR/admin-token`, or `NINE_ROUTER_ADMIN_TOKEN` when supplied.
-Use a generated client key for inference clients. Only loopback binding is
-supported in this preview. HTTP provider URLs are allowed only on loopback;
-remote provider URLs require HTTPS. Redirects are disabled. Configured proxies
-currently return 501 rather than sending the request directly.
+Native installers, built on their respective operating systems:
 
-Import is explicit and requires a new destination database:
+```sh
+bash desktop/scripts/package-macos.sh       # .app and .dmg
+bash desktop/scripts/package-linux.sh       # .deb
+# Windows PowerShell:
+# ./desktop/scripts/package-windows.ps1     # .exe installer
+```
+
+Output: `desktop/target/release/bundle/{macos,dmg,nsis,deb}`. The
+`Rust desktop installers` GitHub workflow builds the three native targets.
+macOS local builds use ad-hoc signing; public distribution still needs a
+Developer ID certificate and notarization. Old alpha.1 artifacts contain the
+superseded custom UI; use alpha.2 or newer for the restored original screens.
+
+## Data and verification
+
+Default data: `~/.9router-rust` (`%LOCALAPPDATA%/.9router-rust` on Windows), separate
+from upstream `~/.9router`. Browser profiles are app-owned. Quit stops owned
+login workers. The admin credential stays in memory after native IPC bootstrap;
+it is never put in a URL or browser storage. Use generated client keys for API
+clients. Provider secrets are omitted from management responses. Local database
+and profile files contain credentials and must remain private.
+
+Explicit import creates a new database and preserves the source:
 
 ```sh
 cargo run --locked --manifest-path desktop/Cargo.toml -- \
   --data-dir "$PWD/desktop/.data/imported" --import-db /path/to/source/data.sqlite
 ```
 
-Native installers (Node is used only to run the pinned Tauri build CLI):
-
 ```sh
-bash desktop/scripts/package-macos.sh       # macOS: DMG
-bash desktop/scripts/package-linux.sh       # Debian/Ubuntu: DEB
-# Windows PowerShell:
-# ./desktop/scripts/package-windows.ps1     # Windows: EXE installer
-```
-
-Output is under `desktop/target/release/bundle/{dmg,nsis,deb}`. Each installer
-must be built on its actual platform. The GitHub workflow `Rust desktop
-installers` runs native macOS, Windows and Linux jobs and uploads their artifacts.
-macOS previews use an ad-hoc signature. Developer ID/notarization and Windows
-distribution signing are not configured.
-
-Verification:
-
-```sh
-node desktop/scripts/snapshot-upstream.mjs --check
-node desktop/scripts/check-ui.mjs
 cargo test --locked --manifest-path desktop/Cargo.toml
-cargo clippy --locked --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
-cargo check --locked --manifest-path desktop/Cargo.toml --features desktop-app
-python3 desktop/scripts/smoke-native.py desktop/target/release/nine-router
+node desktop/scripts/check-ui.mjs
+node desktop/scripts/snapshot-upstream.mjs --check
+node desktop/scripts/snapshot-oauth.mjs --check
+node desktop/scripts/snapshot-muse-dom.mjs --check
+node desktop/scripts/snapshot-codex.mjs --check
+npm --prefix desktop run smoke
 ```
 
-Gateway tests use isolated temporary databases and loopback provider fixtures;
-no live accounts or credentials are used. The upstream JavaScript suite and
-real-provider authentication are separate validation. The immutable catalog
-covers 143 providers and 175 API route files; catalog coverage does not mean
-all adapters or routes are implemented. See the status endpoint `/api/status`
-and the migration ledger for remaining functionality.
+The smoke script uses isolated fixtures and an installed Chrome. It checks page
+rendering and login interactions, not full backend parity. `/api/status` reports
+implemented and pending subsystems. Unsupported operations return an explicit
+error; storing settings does not activate an unported service. Configured
+unported proxies fail before network dispatch.

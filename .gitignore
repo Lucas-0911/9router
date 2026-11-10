@@ -109,3 +109,5 @@ debug.log
 /desktop/.cargo-home/
 /desktop/.npm-cache/
 /desktop/gen/
+/desktop/ui/
+!/desktop/package-lock.json

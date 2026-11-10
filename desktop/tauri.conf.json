@@ -1,14 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "9Router",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "identifier": "com.9router.desktop",
-  "build": { "frontendDist": "./ui", "features": ["desktop-app"] },
+  "build": { "frontendDist": "./ui", "features": ["desktop-app"], "beforeBuildCommand": { "script": "npm run build", "cwd": "." } },
   "app": {
     "windows": [],
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://[::1]:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; worker-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
       "capabilities": [{ "identifier": "main-local", "windows": ["main"], "permissions": [] }]
     }
   },
@@ -19,7 +19,7 @@
     "targets": ["dmg", "nsis", "deb"],
     "category": "DeveloperTool",
     "shortDescription": "Local AI API router with a native Rust backend",
-    "longDescription": "Native desktop preview of the 9Router Rust migration. Supports local configuration and API-key transports; OAuth and cross-protocol parity are not yet available.",
+    "longDescription": "9Router desktop application with the original dashboard and a native Rust routing backend.",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "macOS": { "minimumSystemVersion": "10.15" },
     "windows": { "nsis": { "displayLanguageSelector": true, "languages": ["English", "Vietnamese"] } },

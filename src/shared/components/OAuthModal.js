@@ -582,6 +582,14 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     const handleCallback = async (data) => {
       if (callbackProcessedRef.current) return; // Already processed
 
+      // Native desktop callbacks exchange and save on the Rust backend.
+      if (data.completed && data.state === authData.state) {
+        callbackProcessedRef.current = true;
+        setStep("success");
+        onSuccessRef.current?.();
+        return;
+      }
+
       const { code, token, state, error: callbackError, errorDescription } = data;
 
       if (callbackError) {

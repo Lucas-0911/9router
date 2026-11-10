@@ -1,0 +1,413 @@
+{
+  "version": 1,
+  "sources": {
+    "antigravity": "ddd51d7008600263391652bbe3cf715a99626f0443378281b24a37afb7f692bc",
+    "claude": "6c13eb0bfe431419343deeeac2969ce9a927b9d0ea0f48284d19c3a95349a20f",
+    "cline": "eeec433b1f64ace92b34a69ea538bbfa6b67abbd3f6a424d9f4275db11852d3e",
+    "clinepass": "344695752ca70ddbfc94527258d73cef7cf650a9498754c8f7942ff0f9632cb0",
+    "codebuddy-cn": "3c7723fe3a44e5cd94865a9efcffe746691de8a499255acf1b5585bb84d161fe",
+    "codex": "729204f425602d7a888cbe8152b79eb06bf79ad65dd19281c393833b9bfc7825",
+    "cursor": "f7241a8d3dbdc47a8799cf7083495a7e030299fab55990dc41eee464574d164a",
+    "gemini-cli": "b581b5e82672fc7a7aa57676b941b644969eac23bfbfc880f3d7a10fc119566b",
+    "github": "6f8f823672d6d4e13db68847d9a3a6e8bd4f92e3b8bb71ca5e86af1809149ec6",
+    "gitlab": "a5511e8e0b02be56ca165dccb600fafda7972c861bf9613c53f82ffb3499a337",
+    "glm": "9c6f50411878a5e9a723c6900b910aee824ec70925b380c432c964f6cd730faa",
+    "grok-cli": "96eab2734b8ae7a60f522c3ce700428758835b5029d14107485d53dcaf20e163",
+    "iflow": "7f5afdedef0d7d7c6e871860af2f7bf8cc595f328371643f49f4bbd1386512cb",
+    "kilocode": "691742b07291943f8abe85c981399b94c3cc3d25373c5cb445501c426dfb9f69",
+    "kimchi": "c3ac9a998f74d4ec5c124d16e2101166eb6b0ec9563b286b6c328f0939f154aa",
+    "kimi": "ec5b76542888c27f0d5f5b8ac536c6377ec59e93771f69bc5553eff39536558e",
+    "kiro": "106c63e66af614b67a40970e9d50a18dea1946d3e7a420f1cb86230960b19d6b",
+    "qoder-cn": "45920cc5c6ef3ea921465c3e91f277f36ea53333c49eba0dcd4c451ba6c2a8d8",
+    "qoder": "e338e835a4ddecd6a26419eab1e2a7f7a4cd01ec796c308eaf018862bb20b9cc",
+    "xai": "4aac5a2e90bf15d2de34da146196463cfa7e91526244b07eb6860269408cc12f",
+    "xiaomi-mimo": "c7f8e853b4df414dc9f9a0571aa25b2fa1976751ebfa2f663a3dae8db50c0f1d",
+    "codebuddy-intl": "b5de59cae3d78e2ac170787b3d97961d07422e36d0b35a644723f8f3c113a7e7",
+    "zed": "1860f34dd76b698dac9ef45dce1b89aebf482c1bf58aaa0b136d593da8e179fe",
+    "muse": "ae6cd07b72613273ce957dbcd906f92bb8f80dcc383c3af08f0ec6bc82ae8c02",
+    "minimax-code": "4ff510dc63761a8c1a71c3ec0406c872130403912219edfbdbab7cb0f70579d6",
+    "minimax-code-global": "1869c262ee62c95c646d32d2a8d52c5d87516f2f6d98ad7980823dcaa67a8fd9",
+    "nous": "57fc059b7e0f6654eb69c9ddf48692c068d990bde90e9f7ffb88219a84805cd1"
+  },
+  "providers": {
+    "antigravity": {
+      "flowType": "authorization_code",
+      "config": {
+        "clientId": "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+        "clientSecret": "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",
+        "authorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "userInfoUrl": "https://www.googleapis.com/oauth2/v1/userinfo",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/userinfo.email",
+          "https://www.googleapis.com/auth/userinfo.profile",
+          "https://www.googleapis.com/auth/cclog",
+          "https://www.googleapis.com/auth/experimentsandconfigs"
+        ],
+        "apiEndpoint": "https://daily-cloudcode-pa.googleapis.com",
+        "apiVersion": "v1internal",
+        "loadCodeAssistEndpoint": "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+        "onboardUserEndpoint": "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
+        "loadCodeAssistUserAgent": "antigravity/hub/2.24.0 darwin/arm64",
+        "refreshLeadMs": 300000,
+        "loadCodeAssistClientMetadata": "{\"ideType\":9,\"platform\":2,\"pluginType\":2}"
+      }
+    },
+    "claude": {
+      "flowType": "authorization_code_pkce",
+      "config": {
+        "clientId": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+        "authorizeUrl": "https://claude.ai/oauth/authorize",
+        "tokenUrl": "https://api.anthropic.com/v1/oauth/token",
+        "scopes": [
+          "org:create_api_key",
+          "user:profile",
+          "user:inference"
+        ],
+        "codeChallengeMethod": "S256",
+        "refreshLeadMs": 14400000,
+        "refresh": {
+          "encoding": "json"
+        }
+      }
+    },
+    "cline": {
+      "flowType": "authorization_code",
+      "config": {
+        "appBaseUrl": "https://app.cline.bot",
+        "apiBaseUrl": "https://api.cline.bot",
+        "authorizeUrl": "https://api.cline.bot/api/v1/auth/authorize",
+        "tokenExchangeUrl": "https://api.cline.bot/api/v1/auth/token",
+        "refreshUrl": "https://api.cline.bot/api/v1/auth/refresh"
+      }
+    },
+    "clinepass": {
+      "flowType": "authorization_code",
+      "config": {
+        "appBaseUrl": "https://app.cline.bot",
+        "apiBaseUrl": "https://api.cline.bot",
+        "authorizeUrl": "https://api.cline.bot/api/v1/auth/authorize",
+        "tokenUrl": "https://api.cline.bot/api/v1/auth/token",
+        "refreshUrl": "https://api.cline.bot/api/v1/auth/refresh"
+      }
+    },
+    "codebuddy-cn": {
+      "flowType": "device_code",
+      "config": {
+        "baseUrl": "https://copilot.tencent.com",
+        "stateUrl": "https://copilot.tencent.com/v2/plugin/auth/state",
+        "tokenUrl": "https://copilot.tencent.com/v2/plugin/auth/token",
+        "refreshUrl": "https://copilot.tencent.com/v2/plugin/auth/token/refresh",
+        "userAgent": "CLI/2.63.2 CodeBuddy/2.63.2",
+        "platform": "CLI",
+        "pollInterval": 5000
+      }
+    },
+    "codex": {
+      "flowType": "authorization_code_pkce",
+      "config": {
+        "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "authorizeUrl": "https://auth.openai.com/oauth/authorize",
+        "tokenUrl": "https://auth.openai.com/oauth/token",
+        "scope": "openid profile email offline_access",
+        "codeChallengeMethod": "S256",
+        "fixedPort": 1455,
+        "callbackPath": "/auth/callback",
+        "extraParams": {
+          "id_token_add_organizations": "true",
+          "codex_cli_simplified_flow": "true",
+          "originator": "codex_cli_rs"
+        },
+        "refreshLeadMs": 600000,
+        "refresh": {
+          "encoding": "form",
+          "scope": "openid profile email offline_access"
+        },
+        "maxRefreshAgeMs": 691200000,
+        "trackRefreshAt": true
+      }
+    },
+    "cursor": {
+      "flowType": "import_token",
+      "config": {
+        "apiEndpoint": "https://api2.cursor.sh",
+        "chatEndpoint": "/aiserver.v1.ChatService/StreamUnifiedChatWithTools",
+        "modelsEndpoint": "/agent.v1.AgentService/GetUsableModels",
+        "api3Endpoint": "https://api3.cursor.sh",
+        "agentEndpoint": "https://agent.api5.cursor.sh",
+        "agentNonPrivacyEndpoint": "https://agentn.api5.cursor.sh",
+        "clientVersion": "3.12.17",
+        "clientType": "ide",
+        "dbKeys": {
+          "accessToken": "cursorAuth/accessToken",
+          "machineId": "storage.serviceMachineId"
+        }
+      }
+    },
+    "gemini-cli": {
+      "flowType": "authorization_code",
+      "config": {
+        "clientId": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+        "clientSecret": "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",
+        "authorizeUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "tokenUrl": "https://oauth2.googleapis.com/token",
+        "userInfoUrl": "https://www.googleapis.com/oauth2/v1/userinfo",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/userinfo.email",
+          "https://www.googleapis.com/auth/userinfo.profile"
+        ],
+        "refresh": {
+          "encoding": "form"
+        }
+      }
+    },
+    "github": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "Iv1.b507a08c87ecfe98",
+        "authorizeUrl": "https://github.com/login/oauth/authorize",
+        "deviceCodeUrl": "https://github.com/login/device/code",
+        "tokenUrl": "https://github.com/login/oauth/access_token",
+        "userInfoUrl": "https://api.github.com/user",
+        "scopes": "read:user",
+        "apiVersion": "2022-11-28",
+        "copilotTokenUrl": "https://api.github.com/copilot_internal/v2/token",
+        "userAgent": "GitHubCopilotChat/0.26.7",
+        "editorVersion": "vscode/1.85.0",
+        "editorPluginVersion": "copilot-chat/0.26.7"
+      }
+    },
+    "gitlab": {
+      "flowType": "authorization_code_pkce",
+      "config": {
+        "defaultBaseUrl": "https://gitlab.com",
+        "authorizeUrlPath": "/oauth/authorize",
+        "tokenUrlPath": "/oauth/token",
+        "userInfoUrlPath": "/api/v4/user",
+        "scope": "api read_user",
+        "codeChallengeMethod": "S256"
+      }
+    },
+    "glm": {
+      "flowType": "device_code",
+      "config": {
+        "providerId": "zai",
+        "cliInitUrl": "https://zcode.z.ai/api/v1/oauth/cli/init",
+        "cliPollUrl": "https://zcode.z.ai/api/v1/oauth/cli/poll",
+        "businessLoginUrl": "https://api.z.ai/api/auth/z/login",
+        "apiBaseUrl": "https://api.z.ai",
+        "planApiKeyName": "zcode-api-key"
+      }
+    },
+    "grok-cli": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "deviceCodeUrl": "https://auth.x.ai/oauth2/device/code",
+        "tokenUrl": "https://auth.x.ai/oauth2/token",
+        "refreshUrl": "https://auth.x.ai/oauth2/token",
+        "scope": "openid profile email offline_access grok-cli:access api:access conversations:read conversations:write",
+        "referrer": "grok-build",
+        "refreshLeadMs": 300000
+      }
+    },
+    "iflow": {
+      "flowType": "authorization_code",
+      "config": {
+        "clientId": "10009311001",
+        "clientSecret": "4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW",
+        "authorizeUrl": "https://iflow.cn/oauth",
+        "tokenUrl": "https://iflow.cn/oauth/token",
+        "userInfoUrl": "https://iflow.cn/api/oauth/getUserInfo",
+        "extraParams": {
+          "loginMethod": "phone",
+          "type": "phone"
+        },
+        "refreshLeadMs": 86400000
+      }
+    },
+    "kilocode": {
+      "flowType": "device_code",
+      "config": {
+        "apiBaseUrl": "https://api.kilo.ai",
+        "initiateUrl": "https://api.kilo.ai/api/device-auth/codes",
+        "pollUrlBase": "https://api.kilo.ai/api/device-auth/codes"
+      }
+    },
+    "kimchi": {
+      "flowType": "browser_token",
+      "config": {
+        "webAppUrl": "https://app.kimchi.dev",
+        "validationUrl": "https://api.cast.ai/v1/llm/openai/supported-providers",
+        "userInfoUrl": "https://app.kimchi.dev/api/v1/me",
+        "modelsUrl": "https://llm.kimchi.dev/v1/models/metadata?include_in_cli=true"
+      }
+    },
+    "kimi": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "17e5f671-d194-4dfb-9706-5516cb48c098",
+        "deviceCodeUrl": "https://auth.kimi.com/api/oauth/device_authorization",
+        "tokenUrl": "https://auth.kimi.com/api/oauth/token",
+        "refreshUrl": "https://auth.kimi.com/api/oauth/token",
+        "refreshLeadMs": 300000,
+        "authorizeDeviceUrl": "https://www.kimi.com/code/authorize_device"
+      }
+    },
+    "kiro": {
+      "flowType": "device_code",
+      "config": {
+        "ssoOidcEndpoint": "https://oidc.us-east-1.amazonaws.com",
+        "registerClientUrl": "https://oidc.us-east-1.amazonaws.com/client/register",
+        "deviceAuthUrl": "https://oidc.us-east-1.amazonaws.com/device_authorization",
+        "tokenUrl": "https://oidc.us-east-1.amazonaws.com/token",
+        "startUrl": "https://view.awsapps.com/start",
+        "clientName": "kiro-oauth-client",
+        "clientType": "public",
+        "scopes": [
+          "codewhisperer:completions",
+          "codewhisperer:analysis",
+          "codewhisperer:conversations"
+        ],
+        "grantTypes": [
+          "urn:ietf:params:oauth:grant-type:device_code",
+          "refresh_token"
+        ],
+        "issuerUrl": "https://identitycenter.amazonaws.com/ssoins-722374e8c3c8e6c6",
+        "socialAuthEndpoint": "https://prod.us-east-1.auth.desktop.kiro.dev",
+        "socialLoginUrl": "https://prod.us-east-1.auth.desktop.kiro.dev/login",
+        "socialTokenUrl": "https://prod.us-east-1.auth.desktop.kiro.dev/oauth/token",
+        "socialRefreshUrl": "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken",
+        "authMethods": [
+          "builder-id",
+          "idc",
+          "google",
+          "github",
+          "import"
+        ]
+      }
+    },
+    "qoder-cn": {
+      "flowType": "device_code",
+      "config": {
+        "openApiBaseUrl": "https://openapi.qoder.com.cn",
+        "centerBaseUrl": "https://gateway.qoder.com.cn",
+        "chatBaseUrl": "https://gateway.qoder.com.cn",
+        "deviceTokenUrl": "https://openapi.qoder.com.cn/api/v1/deviceToken/poll",
+        "refreshUrl": "https://gateway.qoder.com.cn/algo/api/v3/user/refresh_token",
+        "userInfoUrl": "https://openapi.qoder.com.cn/api/v1/userinfo",
+        "quotaUsageUrl": "https://openapi.qoder.com.cn/api/v2/quota/usage",
+        "loginUrl": "https://qoder.com.cn/device/selectAccounts"
+      }
+    },
+    "qoder": {
+      "flowType": "device_code",
+      "config": {
+        "openApiBaseUrl": "https://openapi.qoder.sh",
+        "centerBaseUrl": "https://center.qoder.sh",
+        "chatBaseUrl": "https://api3.qoder.sh",
+        "deviceTokenUrl": "https://openapi.qoder.sh/api/v1/deviceToken/poll",
+        "refreshUrl": "https://center.qoder.sh/algo/api/v3/user/refresh_token",
+        "userInfoUrl": "https://openapi.qoder.sh/api/v1/userinfo",
+        "quotaUsageUrl": "https://openapi.qoder.sh/api/v2/quota/usage",
+        "loginUrl": "https://qoder.com/device/selectAccounts"
+      }
+    },
+    "xai": {
+      "flowType": "authorization_code_pkce",
+      "config": {
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "issuer": "https://auth.x.ai",
+        "authEndpointPath": "/oauth2/authorize",
+        "tokenEndpointPath": "/oauth2/token",
+        "discoveryPath": "/.well-known/openid-configuration",
+        "authorizeUrl": "https://auth.x.ai/oauth2/authorize",
+        "tokenUrl": "https://auth.x.ai/oauth2/token",
+        "discoveryUrl": "https://auth.x.ai/.well-known/openid-configuration",
+        "scope": "openid profile email offline_access grok-cli:access api:access",
+        "apiBaseUrl": "https://api.x.ai/v1",
+        "redirectUri": "http://127.0.0.1:56121/callback",
+        "loopbackPort": 56121,
+        "callbackPath": "/callback",
+        "pkceVerifierBytes": 96,
+        "refreshLeadSeconds": 300,
+        "userAgent": "grok-cli/9router",
+        "codeChallengeMethod": "S256"
+      }
+    },
+    "xiaomi-mimo": {
+      "flowType": null,
+      "config": {
+        "platformUrl": "https://platform.xiaomimimo.com",
+        "defaultBaseUrl": "https://api.xiaomimimo.com/v1",
+        "kn": "mimocode",
+        "callbackPath": "/",
+        "timeoutMs": 300000
+      }
+    },
+    "codebuddy-intl": {
+      "flowType": "device_code",
+      "config": {
+        "baseUrl": "https://www.codebuddy.ai",
+        "stateUrl": "https://www.codebuddy.ai/v2/plugin/auth/state",
+        "tokenUrl": "https://www.codebuddy.ai/v2/plugin/auth/token",
+        "refreshUrl": "https://www.codebuddy.ai/v2/plugin/auth/token/refresh",
+        "userAgent": "IDE/2.63.2 CodeBuddy/2.63.2",
+        "platform": "ide",
+        "pollInterval": 5000
+      }
+    },
+    "zed": {
+      "flowType": "authorization_code",
+      "config": {
+        "webBaseUrl": "https://zed.dev",
+        "cloudBaseUrl": "https://cloud.zed.dev",
+        "llmBaseUrl": "https://cloud.zed.dev",
+        "defaultNativeAppPort": 58443,
+        "oauthTimeoutMs": 600000
+      }
+    },
+    "muse": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "1031625952748946",
+        "deviceCodeUrl": "https://auth.meta.com/oidc/device/authorization/",
+        "tokenUrl": "https://auth.meta.com/oidc/device/token/"
+      }
+    },
+    "minimax-code": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "mcode-public",
+        "scope": "agent.default",
+        "audience": "agent-backend",
+        "deviceCodeUrl": "https://account.minimax.cn/oauth2/device/code",
+        "tokenUrl": "https://account.minimax.cn/oauth2/token"
+      }
+    },
+    "minimax-code-global": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "mcode-public",
+        "scope": "agent.default",
+        "audience": "agent-backend",
+        "deviceCodeUrl": "https://account.minimax.io/oauth2/device/code",
+        "tokenUrl": "https://account.minimax.io/oauth2/token"
+      }
+    },
+    "nous": {
+      "flowType": "device_code",
+      "config": {
+        "clientId": "hermes-cli",
+        "portalBaseUrl": "https://portal.nousresearch.com",
+        "deviceCodeUrl": "https://portal.nousresearch.com/api/oauth/device/code",
+        "tokenUrl": "https://portal.nousresearch.com/api/oauth/token",
+        "agentKeyUrl": "https://portal.nousresearch.com/api/oauth/agent-key",
+        "inferenceBaseUrl": "https://inference-api.nousresearch.com/v1",
+        "scope": "inference:invoke inference:mint_agent_key"
+      }
+    }
+  }
+}
