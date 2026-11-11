@@ -19,6 +19,10 @@ for (const entry of REGISTRY) {
 
 const BUILTIN_MODEL_ALIASES = {
   "grok-build": "gcli/grok-build",
+  // MuseRouter clients send these bare ids. muse-spark stays muse-spark and uses the Hatch chat path.
+  "muse-spark": "muse-web/muse-spark",
+  "muse-image": "muse-web/muse-image",
+  "muse-video": "muse-web/muse-video",
 };
 
 /**

@@ -89,4 +89,21 @@ describe("fetchImageAsBase64 hardening", () => {
     mockFetchOnce(PNG, false);
     expect(await fetchImageAsBase64("https://example.com/404.png")).toBeNull();
   });
+
+  it("keeps its timeout when a caller also supplies a cancellation signal", async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+    try {
+      const pending = fetchImageAsBase64("https://example.com/slow.png", {
+        signal: new AbortController().signal, timeoutMs: 10,
+      });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(await pending).toBeNull();
+      expect(globalThis.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

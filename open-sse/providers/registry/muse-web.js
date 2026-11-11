@@ -17,11 +17,10 @@ export default {
   },
   category: "webCookie",
   authType: "cookie",
-  // No "llm": muse-chat stays API-reachable but is hidden from LLM lists —
-  // this provider is surfaced through the image/video media pages only.
-  serviceKinds: ["image", "video"],
+  // Windows 2.0.5 exposes muse-spark as chat plus image and video.
+  serviceKinds: ["llm", "image", "video"],
   videoConfig: { executorDriven: true },
-  authHint: "Paste your muse.ai cookies (hatch_sess=...; hatch_gw=...; hatch_vml=...; hatch_native_auth_device=...) from a logged-in muse.ai session",
+  authHint: "Paste muse.ai cookies. hatch_sess is required. hatch_vml, hatch_native_auth_device and hatch_gw are optional.",
   transport: {
     baseUrl: "https://muse.ai",
     format: "openai",
@@ -29,6 +28,8 @@ export default {
   },
   models: [
     { id: "muse-chat", name: "Muse Chat" },
+    // Same Hatch chat path as muse-chat. Bare id used by MuseRouter clients.
+    { id: "muse-spark", name: "Muse Spark" },
     { id: "muse-image", name: "Muse Image", params: ["n", "size"], kind: "image" },
     { id: "muse-video", name: "Muse Video", params: ["size", "seconds", "image"], kind: "video" },
   ],
