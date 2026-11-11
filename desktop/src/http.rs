@@ -922,7 +922,7 @@ async fn management(state: Arc<Gateway>, request: Request) -> ApiResult<Response
     }
     if path == "/api/status" && method == Method::GET {
         return Ok(axum::Json(json!({"version":env!("CARGO_PKG_VERSION"),"engine":"rust","featureComplete":false,
-            "implemented":["sqlite","model-resolution","connections","aliases","combos","api-keys","original-28-screen-ui","native-browser-login","oauth-pkce-device-flows","oauth-refresh","generic-transports","gemini-cli","codex-responses","muse-web-chat-media","same-protocol-streaming"],
+            "implemented":["sqlite","model-resolution","connections","aliases","combos","api-keys","original-28-screen-ui","native-browser-login","oauth-pkce-device-flows","oauth-refresh","generic-transports","gemini-cli","codex-responses","codex-chat-streaming","muse-web-chat-media","same-protocol-streaming"],
             "remaining":["specialized-provider-auth-and-executors","cross-protocol-streaming","full-management-api-parity","sso","usage-pricing-quota","proxy-transports","tunnels-mitm","rtk","mcp","cli-integrations","authenticated-provider-verification"]})).into_response());
     }
     if (path == "/api/providers" || path == "/api/providers/connections") && method == Method::GET {
@@ -1404,12 +1404,10 @@ async fn inference(
             }
         }
         let (url, target, headers, transformed) = if candidate.provider == "codex" {
-            if !matches!(source, Format::Responses | Format::OpenAi)
-                || (stream && source != Format::Responses)
-            {
+            if !matches!(source, Format::Responses | Format::OpenAi) {
                 last_error = ApiError::new(
                     StatusCode::NOT_IMPLEMENTED,
-                    "Codex supports native Responses streams and non-streaming Chat requests",
+                    "Codex supports Responses and Chat Completions requests",
                 );
                 continue;
             }
@@ -1546,6 +1544,24 @@ async fn inference(
                         ("x-accel-buffering", "no"),
                     ],
                     gemini_cli_stream(response),
+                )
+                    .into_response());
+            }
+            if candidate.provider == "codex" && source == Format::OpenAi {
+                return Ok((
+                    status,
+                    [
+                        ("content-type", "text/event-stream"),
+                        ("x-accel-buffering", "no"),
+                    ],
+                    Body::from_stream(crate::codex::chat_stream(
+                        response,
+                        transformed["model"]
+                            .as_str()
+                            .unwrap_or(&candidate.model)
+                            .to_owned(),
+                        body["stream_options"]["include_usage"] == true,
+                    )),
                 )
                     .into_response());
             }

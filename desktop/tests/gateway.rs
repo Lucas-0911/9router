@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::post,
 };
-use futures_util::{Stream, stream};
+use futures_util::{Stream, StreamExt, stream};
 use nine_router_core::{
     Store,
     http::{Gateway, router},
@@ -108,6 +108,226 @@ async fn web_oauth_accounts_dispatch_without_api_keys_and_google_envelopes_are_u
 }
 
 const ADMIN: &str = "test-admin-only-012345678901234567890123456789";
+
+#[tokio::test]
+async fn codex_chat_streams_before_completion_and_preserves_parallel_tools_reasoning_and_usage() {
+    let release = Arc::new(tokio::sync::Notify::new());
+    let gate = release.clone();
+    let fixture = Router::new().route("/responses", post(move |headers: HeaderMap, axum::Json(body): axum::Json<Value>| {
+        let gate = gate.clone();
+        async move {
+            assert_eq!(headers["authorization"], "Bearer browser-login-token");
+            assert_eq!(body["stream"], true);
+            assert!(body.get("stream_options").is_none());
+            let events = [
+                json!({"type":"response.created","response":{"id":"resp_stream","model":"gpt-5","created_at":123}}),
+                json!({"type":"response.reasoning_summary_text.delta","delta":"Thinking"}),
+                json!({"type":"response.output_text.delta","delta":"Xin chào 🌏"}),
+                json!({"type":"response.output_item.added","item":{"id":"fc_first","type":"function_call","call_id":"call_first","name":"first","arguments":""}}),
+                json!({"type":"response.output_item.added","item":{"id":"fc_second","type":"function_call","call_id":"call_second","name":"second","arguments":""}}),
+                json!({"type":"response.function_call_arguments.delta","item_id":"fc_second","delta":"{\"b\":2}"}),
+                json!({"type":"response.function_call_arguments.delta","item_id":"fc_first","delta":"{\"a\":"}),
+            ];
+            let prefix = events.iter().map(|v| format!("event: {}\r\ndata: {v}\r\n\r\n", v["type"].as_str().unwrap())).collect::<String>();
+            let first = stream::iter(prefix.as_bytes().chunks(3).map(|v| Ok::<_,Infallible>(Bytes::copy_from_slice(v))).collect::<Vec<_>>());
+            let last = stream::once(async move {
+                gate.notified().await;
+                let done = json!({"type":"response.completed","response":{"id":"resp_stream","status":"completed","created_at":123,"model":"gpt-5","output":[
+                    {"id":"rs_fixture","type":"reasoning","encrypted_content":"signed-native-reasoning","summary":[{"type":"summary_text","text":"Thinking"}]},
+                    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Xin chào 🌏","annotations":[{"type":"url_citation","url":"https://example.test/"}]}]},
+                    {"id":"fc_first","type":"function_call","call_id":"call_first","name":"first","arguments":"{\"a\":1}"},
+                    {"id":"fc_second","type":"function_call","call_id":"call_second","name":"second","arguments":"{\"b\":2}"}
+                ],"usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}});
+                Ok::<_,Infallible>(Bytes::from(format!("data: {done}\n\ndata: [DONE]\n\n")))
+            });
+            ([("content-type","text/event-stream")], Body::from_stream(first.chain(last)))
+        }
+    }));
+    let (upstream, fixture_task) = serve(fixture).await;
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = store_at(&temp);
+    store.save_connection(&json!({"provider":"codex","authType":"oauth","accessToken":"browser-login-token","providerSpecificData":{"baseUrl":format!("{upstream}/responses")}})).unwrap();
+    let (base, server) = serve(router(Gateway::new(store, ADMIN.into()).unwrap())).await;
+    let mut response = reqwest::Client::new().post(format!("{base}/v1/chat/completions")).bearer_auth(ADMIN)
+        .json(&json!({"model":"codex/gpt-5","messages":[{"role":"user","content":"Hello"}],"stream":true,"stream_options":{"include_usage":true}})).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !String::from_utf8_lossy(&bytes).contains("Xin chào") {
+            bytes.extend_from_slice(
+                &response
+                    .chunk()
+                    .await
+                    .unwrap()
+                    .expect("text must arrive before completion"),
+            );
+        }
+    })
+    .await
+    .expect("Codex Chat must stream, without waiting for response.completed");
+    release.notify_one();
+    bytes.extend_from_slice(&response.bytes().await.unwrap());
+    let wire = String::from_utf8(bytes).unwrap();
+    assert!(wire.ends_with("data: [DONE]\n\n"), "{wire}");
+    let chunks = wire
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str::<Value>(data).unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        chunks
+            .iter()
+            .all(|c| c["object"] == "chat.completion.chunk")
+    );
+    assert!(
+        chunks
+            .iter()
+            .all(|c| c["id"] == chunks[0]["id"] && c["created"] == 123 && c["model"] == "gpt-5")
+    );
+    let deltas = chunks
+        .iter()
+        .map(|c| &c["choices"][0]["delta"])
+        .collect::<Vec<_>>();
+    assert_eq!(
+        deltas.iter().filter(|d| d["role"] == "assistant").count(),
+        1
+    );
+    assert_eq!(
+        deltas
+            .iter()
+            .filter_map(|d| d["content"].as_str())
+            .collect::<String>(),
+        "Xin chào 🌏"
+    );
+    assert_eq!(
+        deltas
+            .iter()
+            .filter_map(|d| d["reasoning_content"].as_str())
+            .collect::<String>(),
+        "Thinking"
+    );
+    assert!(deltas.iter().any(
+        |d| d["extra_content"]["openai"]["responses_reasoning"][0]["encrypted_content"]
+            == "signed-native-reasoning"
+    ));
+    assert!(
+        deltas
+            .iter()
+            .any(|d| d["annotations"][0]["url"] == "https://example.test/")
+    );
+    for (index, id, name, arguments) in [
+        (0, "call_first", "first", "{\"a\":1}"),
+        (1, "call_second", "second", "{\"b\":2}"),
+    ] {
+        let calls = deltas
+            .iter()
+            .filter_map(|d| d["tool_calls"].as_array())
+            .flatten()
+            .filter(|c| c["index"] == index)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls
+                .iter()
+                .filter_map(|c| c["id"].as_str())
+                .collect::<String>(),
+            id
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter_map(|c| c["function"]["name"].as_str())
+                .collect::<String>(),
+            name
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter_map(|c| c["function"]["arguments"].as_str())
+                .collect::<String>(),
+            arguments
+        );
+    }
+    let finishes = chunks
+        .iter()
+        .filter(|c| !c["choices"][0]["finish_reason"].is_null())
+        .collect::<Vec<_>>();
+    assert_eq!(finishes.len(), 1);
+    assert_eq!(finishes[0]["choices"][0]["finish_reason"], "tool_calls");
+    assert!(finishes[0].get("usage").is_none());
+    let usages = chunks
+        .iter()
+        .filter(|chunk| chunk.get("usage").is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(usages.len(), 1);
+    assert_eq!(usages[0]["choices"], json!([]));
+    assert_eq!(usages[0]["usage"]["total_tokens"], 15);
+    assert_eq!(
+        usages[0]["usage"]["prompt_tokens_details"]["cached_tokens"],
+        3
+    );
+    assert_eq!(
+        usages[0]["usage"]["completion_tokens_details"]["reasoning_tokens"],
+        2
+    );
+    server.abort();
+    fixture_task.abort();
+}
+
+#[tokio::test]
+async fn codex_chat_stream_failures_never_report_success_or_expose_upstream_secrets() {
+    let fixture = Router::new().route("/responses", post(|axum::Json(body): axum::Json<Value>| async move {
+        let mode = body["input"][0]["content"][0]["text"].as_str().unwrap();
+        let completed = json!({"type":"response.completed","response":{"status":"completed","model":"gpt-5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"final only","annotations":[]}]}],"usage":{"input_tokens":1,"output_tokens":2}}});
+        let wire = match mode {
+            "failed" => "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"provider-private-secret\"}}}\n\n".into(),
+            "incomplete" => "data: {\"type\":\"response.incomplete\"}\n\n".into(),
+            "malformed" => "data: {not-json}\n\n".into(),
+            "eof" => "data: [DONE]\n\n".into(),
+            "unknown" => "data: {\"type\":\"response.unknown_output.delta\",\"delta\":\"opaque\"}\n\n".into(),
+            "edited" => format!("data: {{\"type\":\"response.output_text.delta\",\"delta\":\"original\"}}\n\ndata: {completed}\n\n"),
+            "final-only" => format!("data: {completed}\n\n"),
+            _ => unreachable!(),
+        };
+        ([("content-type","text/event-stream")], wire)
+    }));
+    let (upstream, fixture_task) = serve(fixture).await;
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = store_at(&temp);
+    store.save_connection(&json!({"provider":"codex","authType":"oauth","accessToken":"provider-private-secret","providerSpecificData":{"baseUrl":format!("{upstream}/responses")}})).unwrap();
+    let (base, server) = serve(router(Gateway::new(store, ADMIN.into()).unwrap())).await;
+    for mode in [
+        "failed",
+        "incomplete",
+        "malformed",
+        "eof",
+        "unknown",
+        "edited",
+        "final-only",
+    ] {
+        let response = reqwest::Client::new().post(format!("{base}/v1/chat/completions")).bearer_auth(ADMIN)
+            .json(&json!({"model":"codex/gpt-5","messages":[{"role":"user","content":mode}],"stream":true})).send().await.unwrap();
+        assert_eq!(response.status(), 200);
+        let wire = response.text().await.unwrap();
+        assert!(!wire.contains("provider-private-secret"));
+        if mode == "final-only" {
+            assert!(wire.contains("\"content\":\"final only\""), "{wire}");
+            assert!(wire.ends_with("data: [DONE]\n\n"));
+            assert!(!wire.contains("\"usage\""));
+        } else {
+            assert!(
+                wire.contains("\"code\":\"invalid_stream\""),
+                "{mode}: {wire}"
+            );
+            assert!(
+                !wire.contains("[DONE]") && !wire.contains("\"finish_reason\":\"stop\""),
+                "{wire}"
+            );
+        }
+    }
+    server.abort();
+    fixture_task.abort();
+}
 
 async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -264,17 +484,14 @@ async fn retry_accounts_preserves_request_fields_and_never_forwards_client_auth(
 }
 
 struct PendingBody {
-    first: bool,
+    first: Option<&'static [u8]>,
     dropped: Arc<tokio::sync::Notify>,
 }
 impl Stream for PendingBody {
     type Item = Result<Bytes, Infallible>;
     fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.first {
-            self.first = false;
-            Poll::Ready(Some(Ok(Bytes::from_static(
-                b"data: {\"delta\":\"first\"}\n\n",
-            ))))
+        if let Some(first) = self.first.take() {
+            Poll::Ready(Some(Ok(Bytes::from_static(first))))
         } else {
             Poll::Pending
         }
@@ -288,45 +505,67 @@ impl Drop for PendingBody {
 
 #[tokio::test]
 async fn streaming_reaches_client_before_completion_and_disconnect_cancels_upstream() {
-    let dropped = Arc::new(tokio::sync::Notify::new());
-    let fixture_dropped = dropped.clone();
-    let fixture = Router::new().route(
-        "/v1/chat/completions",
-        post(move || {
-            let dropped = fixture_dropped.clone();
-            async move {
-                (
-                    [("content-type", "text/event-stream")],
-                    Body::from_stream(PendingBody {
-                        first: true,
-                        dropped,
-                    }),
-                )
-            }
-        }),
-    );
-    let (upstream, fixture_task) = serve(fixture).await;
-    let temp = tempfile::tempdir().unwrap();
-    let mut store = store_at(&temp);
-    connection(&mut store, "stream-provider-key", 1, &upstream);
-    let (url, server) = serve(router(Gateway::new(store, ADMIN.into()).unwrap())).await;
-    let mut response=reqwest::Client::new().post(format!("{url}/v1/chat/completions")).bearer_auth(ADMIN)
-        .json(&json!({"model":"openai/gpt-4o","stream":true,"messages":[{"role":"user","content":"test"}]})).send().await.unwrap();
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(3), response.chunk())
+    for (model, first) in [
+        (
+            "openai/gpt-4o",
+            b"data: {\"delta\":\"first\"}\n\n".as_slice(),
+        ),
+        (
+            "codex/gpt-5",
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n".as_slice(),
+        ),
+    ] {
+        let dropped = Arc::new(tokio::sync::Notify::new());
+        let fixture_dropped = dropped.clone();
+        let fixture = Router::new().route(
+            "/v1/chat/completions",
+            post(move || {
+                let dropped = fixture_dropped.clone();
+                async move {
+                    (
+                        [("content-type", "text/event-stream")],
+                        Body::from_stream(PendingBody {
+                            first: Some(first),
+                            dropped,
+                        }),
+                    )
+                }
+            }),
+        );
+        let (upstream, fixture_task) = serve(fixture).await;
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = store_at(&temp);
+        connection(&mut store, "stream-provider-key", 1, &upstream);
+        store.save_connection(&json!({"provider":"codex","authType":"oauth","accessToken":"browser-login-token","providerSpecificData":{"baseUrl":format!("{upstream}/v1/chat/completions")}})).unwrap();
+        let (url, server) = serve(router(Gateway::new(store, ADMIN.into()).unwrap())).await;
+        let mut response = reqwest::Client::new()
+            .post(format!("{url}/v1/chat/completions"))
+            .bearer_auth(ADMIN)
+            .json(
+                &json!({"model":model,"stream":true,"messages":[{"role":"user","content":"test"}]}),
+            )
+            .send()
             .await
-            .unwrap()
-            .unwrap()
-            .unwrap(),
-        "data: {\"delta\":\"first\"}\n\n"
-    );
-    drop(response);
-    tokio::time::timeout(Duration::from_secs(3), dropped.notified())
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let mut bytes = Vec::new();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !String::from_utf8_lossy(&bytes).contains("first") {
+                bytes.extend_from_slice(&response.chunk().await.unwrap().unwrap());
+            }
+        })
         .await
-        .expect("upstream response body must be dropped after downstream disconnect");
-    server.abort();
-    fixture_task.abort();
+        .unwrap();
+        if model.starts_with("openai/") {
+            assert_eq!(bytes, first);
+        }
+        drop(response);
+        tokio::time::timeout(Duration::from_secs(3), dropped.notified())
+            .await
+            .expect("upstream response body must be dropped after downstream disconnect");
+        server.abort();
+        fixture_task.abort();
+    }
 }
 
 #[tokio::test]
@@ -368,7 +607,7 @@ async fn sse_is_byte_preserving_and_unsupported_adapters_do_not_dispatch() {
     assert_eq!(response.status(), 200);
     assert_eq!(response.text().await.unwrap(), SSE);
     let response = client
-        .post(format!("{url}/v1/chat/completions"))
+        .post(format!("{url}/v1/messages"))
         .bearer_auth(ADMIN)
         .json(&json!({"model":"codex/gpt-5","messages":[],"stream":true}))
         .send()

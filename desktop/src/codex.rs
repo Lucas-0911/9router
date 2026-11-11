@@ -1,4 +1,4 @@
-//! Codex Responses transport and loss-checked, non-streaming Chat conversion.
+//! Codex Responses transport and loss-checked Chat conversion.
 //! Defaults are snapshotted from the original executor; no JavaScript runtime runs.
 use crate::Result;
 use futures_util::StreamExt;
@@ -8,7 +8,7 @@ use reqwest::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{io, sync::OnceLock};
+use std::{collections::VecDeque, io, sync::OnceLock};
 
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 fn invalid(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
@@ -461,6 +461,24 @@ pub fn from_chat(body: &Value) -> Result<Value> {
     if body.get("n").is_some_and(|value| value != 1) {
         return Err(unsupported("Codex supports one response candidate"));
     }
+    if let Some(options) = body.get("stream_options").filter(|value| !value.is_null()) {
+        fields(options, &["include_usage"])?;
+        if options
+            .get("include_usage")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(invalid("Chat include_usage must be a boolean"));
+        }
+    }
+    if let Some(tools) = body.get("tools").filter(|value| !value.is_null()) {
+        for tool in array(tools, "Chat tools must be an array")? {
+            if tool["type"] != "function" {
+                return Err(unsupported(
+                    "Hosted tools require the native Responses endpoint",
+                ));
+            }
+        }
+    }
     let mut input = Vec::new();
     for message in array(&body["messages"], "Chat messages must be an array")? {
         fields(
@@ -669,6 +687,285 @@ pub fn to_chat(response: &Value) -> Result<Value> {
     Ok(out)
 }
 
+struct StreamTool {
+    item_id: String,
+    id: String,
+    name: String,
+    arguments: String,
+}
+struct ChatStream {
+    id: String,
+    model: String,
+    created: u64,
+    started: bool,
+    content: String,
+    summary: String,
+    refusal: String,
+    tools: Vec<StreamTool>,
+}
+impl ChatStream {
+    fn new(model: String) -> Self {
+        Self {
+            id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+            model,
+            created: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            started: false,
+            content: String::new(),
+            summary: String::new(),
+            refusal: String::new(),
+            tools: Vec::new(),
+        }
+    }
+    fn chunk(&self, delta: Value, finish: Value) -> Value {
+        json!({"id":self.id,"object":"chat.completion.chunk","created":self.created,"model":self.model,"choices":[{"index":0,"delta":delta,"finish_reason":finish}]})
+    }
+    fn emit(&mut self, delta: Value, output: &mut Vec<Value>) {
+        if !self.started {
+            self.started = true;
+            output.push(self.chunk(json!({"role":"assistant"}), Value::Null));
+        }
+        output.push(self.chunk(delta, Value::Null));
+    }
+    fn start_tool(&mut self, item: &Value, output: &mut Vec<Value>) -> Result<()> {
+        let id = text(&item["call_id"], "Missing Codex tool call id")?;
+        let name = text(&item["name"], "Missing Codex tool name")?;
+        let item_id = item["id"].as_str().unwrap_or(id);
+        if id.is_empty() || name.is_empty() || item_id.is_empty() {
+            return Err(invalid("Empty Codex tool identity"));
+        }
+        if let Some(existing) = self
+            .tools
+            .iter()
+            .find(|tool| tool.item_id == item_id || tool.id == id)
+        {
+            if existing.id != id || existing.name != name || existing.item_id != item_id {
+                return Err(invalid("Codex tool identity changed during streaming"));
+            }
+            return Ok(());
+        }
+        let index = self.tools.len();
+        self.tools.push(StreamTool {
+            item_id: item_id.into(),
+            id: id.into(),
+            name: name.into(),
+            arguments: String::new(),
+        });
+        self.emit(json!({"tool_calls":[{"index":index,"id":id,"type":"function","function":{"name":name,"arguments":""}}]}), output);
+        Ok(())
+    }
+    fn event(&mut self, event: &Value, include_usage: bool) -> Result<Vec<Value>> {
+        let mut output = Vec::new();
+        match event["type"].as_str().unwrap_or("") {
+            "response.created" => {
+                if self.started || !event["response"].is_object() {
+                    return Err(invalid("Invalid Codex creation event"));
+                }
+                if let Some(created) = event["response"]["created_at"].as_u64() {
+                    self.created = created;
+                }
+                if let Some(model) = event["response"]["model"].as_str() {
+                    self.model = model.into();
+                }
+            }
+            "response.output_text.delta"
+            | "response.reasoning_summary_text.delta"
+            | "response.refusal.delta" => {
+                let delta = text(&event["delta"], "Invalid Codex text delta")?;
+                let key = match event["type"].as_str().unwrap() {
+                    "response.output_text.delta" => {
+                        self.content.push_str(delta);
+                        "content"
+                    }
+                    "response.refusal.delta" => {
+                        self.refusal.push_str(delta);
+                        "refusal"
+                    }
+                    _ => {
+                        self.summary.push_str(delta);
+                        "reasoning_content"
+                    }
+                };
+                if !delta.is_empty() {
+                    self.emit(json!({key:delta}), &mut output);
+                }
+            }
+            "response.output_item.added" => match event["item"]["type"].as_str() {
+                Some("function_call") => self.start_tool(&event["item"], &mut output)?,
+                Some("message" | "reasoning") => {}
+                _ => return Err(unsupported("Codex Chat cannot stream this output item")),
+            },
+            "response.function_call_arguments.delta" => {
+                let item_id = text(&event["item_id"], "Missing Codex argument item id")?;
+                let index = self
+                    .tools
+                    .iter()
+                    .position(|tool| tool.item_id == item_id)
+                    .ok_or_else(|| invalid("Unknown Codex argument item id"))?;
+                let delta = text(&event["delta"], "Invalid Codex argument delta")?;
+                self.tools[index].arguments.push_str(delta);
+                if !delta.is_empty() {
+                    self.emit(
+                        json!({"tool_calls":[{"index":index,"function":{"arguments":delta}}]}),
+                        &mut output,
+                    );
+                }
+            }
+            "response.completed" => {
+                let response = &event["response"];
+                let chat = to_chat(response)?;
+                if !self.started {
+                    if let Some(created) = response["created_at"].as_u64() {
+                        self.created = created;
+                    }
+                    if let Some(model) = response["model"].as_str() {
+                        self.model = model.into();
+                    }
+                }
+                let message = &chat["choices"][0]["message"];
+                for key in ["content", "reasoning_content", "refusal"] {
+                    let emitted = match key {
+                        "content" => self.content.as_str(),
+                        "reasoning_content" => self.summary.as_str(),
+                        _ => self.refusal.as_str(),
+                    };
+                    let full = message[key].as_str().unwrap_or_default();
+                    let suffix = full
+                        .strip_prefix(emitted)
+                        .ok_or_else(|| invalid("Codex final text differs from emitted deltas"))?;
+                    if !suffix.is_empty() {
+                        self.emit(json!({key:suffix}), &mut output);
+                    }
+                }
+                let final_calls = response["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|item| item["type"] == "function_call")
+                    .collect::<Vec<_>>();
+                if self
+                    .tools
+                    .iter()
+                    .any(|tool| !final_calls.iter().any(|call| call["call_id"] == tool.id))
+                {
+                    return Err(invalid("Codex completion lost an emitted tool call"));
+                }
+                let mut ids = std::collections::HashSet::new();
+                for item in final_calls {
+                    if !ids.insert(text(&item["call_id"], "Missing Codex tool id")?) {
+                        return Err(invalid("Duplicate Codex tool call id"));
+                    }
+                    self.start_tool(item, &mut output)?;
+                    let index = self
+                        .tools
+                        .iter()
+                        .position(|tool| item["call_id"] == tool.id)
+                        .unwrap();
+                    let arguments = text(&item["arguments"], "Invalid Codex tool arguments")?;
+                    let suffix = arguments
+                        .strip_prefix(&self.tools[index].arguments)
+                        .ok_or_else(|| {
+                            invalid("Codex final arguments differ from emitted deltas")
+                        })?;
+                    if !suffix.is_empty() {
+                        self.emit(
+                            json!({"tool_calls":[{"index":index,"function":{"arguments":suffix}}]}),
+                            &mut output,
+                        );
+                    }
+                }
+                let mut metadata = json!({});
+                for key in ["extra_content", "annotations"] {
+                    if let Some(value) = message.get(key) {
+                        metadata[key] = value.clone();
+                    }
+                }
+                if !metadata.as_object().unwrap().is_empty() || !self.started {
+                    self.emit(metadata, &mut output);
+                }
+                output.push(self.chunk(json!({}), chat["choices"][0]["finish_reason"].clone()));
+                if include_usage && let Some(usage) = chat.get("usage") {
+                    let mut last = self.chunk(json!({}), Value::Null);
+                    last["choices"] = json!([]);
+                    last["usage"] = usage.clone();
+                    output.push(last);
+                }
+            }
+            "response.queued"
+            | "response.in_progress"
+            | "response.output_item.done"
+            | "response.content_part.added"
+            | "response.content_part.done"
+            | "response.output_text.done"
+            | "response.refusal.done"
+            | "response.function_call_arguments.done"
+            | "response.reasoning_summary_part.added"
+            | "response.reasoning_summary_part.done"
+            | "response.reasoning_summary_text.done"
+            | "response.output_text.annotation.added" => {}
+            _ => return Err(unsupported("Unsupported Codex Chat stream event")),
+        }
+        Ok(output)
+    }
+}
+
+/// Pull-based conversion: disconnect drops the owned upstream response immediately.
+pub fn chat_stream(
+    response: reqwest::Response,
+    model: String,
+    include_usage: bool,
+) -> impl futures_util::Stream<Item = io::Result<Vec<u8>>> {
+    futures_util::stream::unfold(
+        (
+            response.bytes_stream(),
+            Sse::default(),
+            ChatStream::new(model),
+            VecDeque::new(),
+            false,
+        ),
+        move |(mut source, mut parser, mut chat, mut pending, mut done)| async move {
+            loop {
+                if let Some(packet) = pending.pop_front() {
+                    return Some((Ok(packet), (source, parser, chat, pending, done)));
+                }
+                if done {
+                    return None;
+                }
+                let next = source.next().await;
+                let eof = next.is_none();
+                let events = match next {
+                    Some(Ok(bytes)) => parser.events(&bytes, false),
+                    Some(Err(_)) => Err(invalid("Codex stream interrupted")),
+                    None => parser.events(&[], true),
+                };
+                let translated = events.and_then(|events| {
+                    for event in events {
+                        for chunk in chat.event(&event, include_usage)? {
+                            pending.push_back(format!("data: {chunk}\n\n").into_bytes());
+                        }
+                        if event["type"] == "response.completed" {
+                            done = true;
+                            pending.push_back(b"data: [DONE]\n\n".to_vec());
+                            break;
+                        }
+                    }
+                    if eof && !done {
+                        return Err(invalid("Codex stream ended before completion"));
+                    }
+                    Ok(())
+                });
+                if translated.is_err() {
+                    pending.clear();
+                    pending.push_back(b"data: {\"error\":{\"message\":\"Codex stream is invalid or incomplete\",\"type\":\"upstream_error\",\"code\":\"invalid_stream\"}}\n\n".to_vec());
+                    done = true;
+                }
+            }
+        },
+    )
+}
+
 /// No detached reader task: dropping this future also drops/cancels the HTTP body.
 pub async fn aggregate(response: reqwest::Response) -> Result<Value> {
     if !response.status().is_success()
@@ -710,6 +1007,12 @@ struct Sse {
 }
 impl Sse {
     fn push(&mut self, bytes: &[u8], eof: bool) -> Result<Option<Value>> {
+        Ok(self.events(bytes, eof)?.into_iter().find_map(|event| {
+            (event["type"] == "response.completed").then(|| event["response"].clone())
+        }))
+    }
+    fn events(&mut self, bytes: &[u8], eof: bool) -> Result<Vec<Value>> {
+        let mut events = Vec::new();
         self.total = self
             .total
             .checked_add(bytes.len())
@@ -736,7 +1039,7 @@ impl Sse {
                 .to_owned();
             self.buffer.drain(..count);
             if let Some(value) = self.line(&line)? {
-                return Ok(Some(value));
+                events.push(value);
             }
         }
         if eof {
@@ -744,12 +1047,14 @@ impl Sse {
                 let remaining = String::from_utf8(std::mem::take(&mut self.buffer))
                     .map_err(|_| invalid("Invalid UTF-8 in Codex SSE"))?;
                 if let Some(value) = self.line(&remaining)? {
-                    return Ok(Some(value));
+                    events.push(value);
                 }
             }
-            return self.line("");
+            if let Some(value) = self.line("")? {
+                events.push(value);
+            }
         }
-        Ok(None)
+        Ok(events)
     }
     fn line(&mut self, line: &str) -> Result<Option<Value>> {
         if line.is_empty() {
@@ -761,9 +1066,15 @@ impl Sse {
             if data == "[DONE]" {
                 return Ok(None);
             }
-            let value: Value =
+            let mut value: Value =
                 serde_json::from_str(&data).map_err(|_| invalid("Invalid JSON in Codex SSE"))?;
-            let kind = value["type"].as_str().unwrap_or(&event);
+            if !value.is_object() {
+                return Err(invalid("Codex SSE event must be an object"));
+            }
+            if value.get("type").is_none() {
+                value["type"] = json!(event);
+            }
+            let kind = text(&value["type"], "Codex SSE event requires a type")?;
             if matches!(kind, "error" | "response.failed" | "response.incomplete") {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -771,12 +1082,12 @@ impl Sse {
                 )
                 .into());
             }
-            if kind == "response.completed" {
-                if !value["response"].is_object() || value["response"]["status"] != "completed" {
-                    return Err(invalid("Invalid completed Codex response"));
-                }
-                return Ok(Some(value["response"].clone()));
+            if kind == "response.completed"
+                && (!value["response"].is_object() || value["response"]["status"] != "completed")
+            {
+                return Err(invalid("Invalid completed Codex response"));
             }
+            return Ok(Some(value));
         } else if !line.starts_with(':') {
             let (field, value) = line.split_once(':').unwrap_or((line, ""));
             let value = value.strip_prefix(' ').unwrap_or(value);
@@ -907,6 +1218,51 @@ mod tests {
         let mut image = response;
         image["output"] = json!([{"type":"image_generation_call","result":"opaque"}]);
         assert!(to_chat(&image).is_err());
+    }
+    #[test]
+    fn chat_stream_options_and_unrepresentable_hosted_tools_are_rejected() {
+        for options in [
+            json!(true),
+            json!({"include_usage":"yes"}),
+            json!({"unknown":true}),
+        ] {
+            assert!(
+                from_chat(&json!({"messages":[],"stream":true,"stream_options":options})).is_err()
+            );
+        }
+        assert!(from_chat(&json!({"messages":[],"tools":[{"type":"image_generation"}]})).is_err());
+        assert!(
+            from_chat(
+                &json!({"messages":[],"stream":true,"stream_options":{"include_usage":false}})
+            )
+            .is_ok()
+        );
+    }
+    #[test]
+    fn chat_stream_final_only_uses_upstream_metadata_and_preserves_refusals() {
+        let mut response = completed();
+        response["created_at"] = json!(456);
+        response["output"][1]["content"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"refusal","refusal":"Cannot do that"}));
+        let mut stream = ChatStream::new("request-alias".into());
+        let chunks = stream
+            .event(
+                &json!({"type":"response.completed","response":response}),
+                false,
+            )
+            .unwrap();
+        assert!(chunks.iter().all(|chunk| chunk["model"] == "gpt-5.6-sol"
+            && chunk["created"] == 456
+            && chunk.get("usage").is_none()));
+        assert_eq!(
+            chunks
+                .iter()
+                .filter_map(|chunk| chunk["choices"][0]["delta"]["refusal"].as_str())
+                .collect::<String>(),
+            "Cannot do that"
+        );
     }
     #[test]
     fn parser_handles_arbitrary_byte_splits_comments_crlf_and_multiline_json() {

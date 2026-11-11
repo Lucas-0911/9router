@@ -1,3 +1,11 @@
+# Rust desktop 0.1.0-alpha.3 (2026-11-11)
+
+## Added
+- Codex OAuth accounts support streaming through Chat Completions, including parallel function calls, reasoning summaries, native signed reasoning, citations and optional token usage.
+
+## Fixed
+- Invalid or incomplete Codex Chat streams report a redacted error without a successful completion marker; client disconnect cancels the upstream stream.
+
 # v0.5.116 (2026-11-08)
 
 ## Features

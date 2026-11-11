@@ -17,8 +17,12 @@ The same native capture supports the six original web providers. This does not
 mean all six inference executors have been ported: Muse chat/image/video is
 implemented; the other specialized web executors remain pending. Native OAuth
 authorization, PKCE, device-code polling and refresh are implemented for common
-providers. Codex Responses, Gemini CLI and generic OAuth transports are wired to
-inference. Cursor, Zed, Xiaomi, Trae and Windsurf need specialized auth adapters.
+providers. Codex Responses and Chat Completions (including streaming), Gemini CLI
+and generic OAuth transports are wired to inference. Codex Chat preserves text,
+parallel function calls, refusals, reasoning summaries and signed native reasoning,
+annotations and optional usage. Invalid/incomplete streams report an error without
+a successful finish marker. Hosted tools use the native Responses endpoint.
+Cursor, Zed, Xiaomi, Trae and Windsurf need specialized auth adapters.
 Real-provider authentication and generation require an opt-in account test.
 
 ## Build and run

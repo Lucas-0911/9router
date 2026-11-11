@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import provider from '../../open-sse/providers/registry/codex.js';
 import { CODEX_DEFAULT_INSTRUCTIONS } from '../../open-sse/config/codexInstructions.js';
 const sources = {};
-for (const name of ['open-sse/executors/codex.js', 'open-sse/config/codexInstructions.js', 'open-sse/providers/registry/codex.js']) {
+for (const name of ['open-sse/executors/codex.js', 'open-sse/config/codexInstructions.js', 'open-sse/providers/registry/codex.js', 'open-sse/translator/response/openai-responses.js']) {
   sources[name] = createHash('sha256').update(await readFile(new URL('../../' + name, import.meta.url))).digest('hex');
 }
 const content = JSON.stringify({ version: 1, sources, instructions: CODEX_DEFAULT_INSTRUCTIONS, transport: provider.transport, models: provider.models }, null, 2) + '\n';

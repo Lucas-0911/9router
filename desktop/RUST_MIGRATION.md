@@ -52,7 +52,7 @@ Native Rust now implements browser capture for all six original web-login
 providers with app-owned Chrome profiles, domain-bound cookies and cancellation.
 Common OAuth authorization/PKCE/device-code flows, loopback callbacks, private
 token persistence and refresh are implemented. Codex native Responses and the
-bounded non-streaming Chat conversion, Gemini CLI envelopes and generic OAuth
+bounded Chat conversion, Gemini CLI envelopes and generic OAuth
 transports can dispatch saved login credentials. Muse chat and image/video use
 the original browser DOM expressions from Rust through CDP; input images and
 downloads are bounded. Browser-side expressions are not a Node backend.
@@ -81,3 +81,17 @@ The full scope is still mandatory. Remaining work includes:
 Unsupported credential/proxy adapters reject before network dispatch. Unported
 stream conversions reject before SSE headers. Do not call this checkpoint a
 feature-complete Rust replacement.
+
+## Codex Chat streaming checkpoint (alpha.3)
+
+OAuth Codex connections now accept `stream: true` at `/v1/chat/completions`.
+The Rust adapter incrementally converts Responses SSE, correlates parallel tool
+arguments by native item ID, reconciles completion-only text/arguments and retains
+refusals, annotations and native signed reasoning. Optional usage retains cache
+and reasoning token counts. No reader task runs ahead of the downstream body;
+disconnect cancels the owned upstream response. Corrupt, changed or unfinished
+output reports a redacted stream error without a success marker.
+
+Loopback fixtures verify early delivery, split UTF-8/CRLF input, interleaved tool
+calls, completion reconciliation, optional usage, cancellation and failed streams.
+These checks do not establish real-account authentication or full translator parity.
