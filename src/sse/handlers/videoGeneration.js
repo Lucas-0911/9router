@@ -158,6 +158,7 @@ export async function handleVideoCreate(request, action) {
   let lastStatus = null;
 
   while (true) {
+    if (request.signal.aborted) return errorResponse(499, "Request aborted");
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
     if (!credentials || credentials.allRateLimited) {
@@ -200,6 +201,8 @@ export async function handleVideoCreate(request, action) {
       log.info("VIDEO", `${provider.toUpperCase()} | ${action} accepted (connection ${credentials.connectionId})`);
       return withConnectionHeader(result.response, credentials.connectionId);
     }
+
+    if (request.signal.aborted) return result.response;
 
     // Record the failure (dashboard shows lastError/errorCode → user sees re-auth is needed)
     const { shouldFallback } = await markAccountUnavailable(

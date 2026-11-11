@@ -87,7 +87,7 @@ async function executeExecutorDrivenVideo({ provider, rawBody, credentials, sign
     };
   } catch (error) {
     const message = sanitizeSecrets(error?.message || "video generation failed", credentials);
-    const status = error?.status && Number.isInteger(error.status) ? error.status : 502;
+    const status = signal?.aborted ? 499 : error?.status && Number.isInteger(error.status) ? error.status : 502;
     return createErrorResult(status, `[${provider}] ${message}`);
   }
 }
