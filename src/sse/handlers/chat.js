@@ -316,6 +316,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       log,
+      signal: request?.signal,
       clientRawRequest,
       connectionId: credentials.connectionId,
       userAgent,
@@ -357,7 +358,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success || request?.signal?.aborted) return result.response;
 
     // Antigravity 409/429: refresh live quota to get exact resetAt before locking
     let quotaResetMs = null;

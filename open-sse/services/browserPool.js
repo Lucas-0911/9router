@@ -98,6 +98,10 @@ async function resolveCloakLaunch() {
 function resetIdleTimer() {
   if (state.idleTimer) clearTimeout(state.idleTimer);
   state.idleTimer = setTimeout(() => {
+    if ([...state.contexts.values()].some((pooled) => pooled.activeUses > 0)) {
+      resetIdleTimer();
+      return;
+    }
     void shutdownPool("idle-timeout");
   }, POOL_IDLE_TIMEOUT_MS);
   state.idleTimer.unref?.();
@@ -106,7 +110,7 @@ function resetIdleTimer() {
 function evictStaleContexts() {
   const now = Date.now();
   for (const [key, pooled] of state.contexts) {
-    if (now - pooled.lastUsed > CONTEXT_TTL_MS) {
+    if (!pooled.activeUses && now - pooled.lastUsed > CONTEXT_TTL_MS) {
       console.log(
         "[BrowserPool] Evicted stale context",
         "(idle",
@@ -260,12 +264,15 @@ function parseCookieString(raw, domain) {
       const name = pair.slice(0, eq).trim();
       const value = pair.slice(eq + 1).trim();
       if (!name || !value) return null;
+      // CDP rejects expires:-1 with "Invalid cookie fields". Omit it so the
+      // cookie stays a session cookie. __Host- must not carry a Domain.
+      const hostOnly = name.startsWith("__Host-");
+      const bare = domain.replace(/^\./, "");
       return {
         name,
         value,
-        domain: domain.startsWith(".") ? domain : `.${domain}`,
+        domain: hostOnly ? bare : (domain.startsWith(".") ? domain : `.${domain}`),
         path: "/",
-        expires: -1,
         httpOnly: false,
         secure: true,
         sameSite: "Lax",
@@ -368,8 +375,14 @@ export async function acquireBrowserContext(key, options) {
       ...(options.storageState ? { storageState: options.storageState } : {}),
     });
 
-    await seedContextSession(context, options);
-    const warmupPage = await createWarmupPage(context, options.warmupUrl);
+    let warmupPage;
+    try {
+      await seedContextSession(context, options);
+      warmupPage = await createWarmupPage(context, options.warmupUrl);
+    } catch (error) {
+      await context.close().catch(() => {});
+      throw error;
+    }
 
     // Guard: if shutdownPool() ran while we were creating this context,
     // the browser we obtained is now closed. Close our temp context and
@@ -387,9 +400,13 @@ export async function acquireBrowserContext(key, options) {
       context,
       warmupPage,
       lastUsed: Date.now(),
+      activeUses: 0,
       isStealth,
     };
     state.contexts.set(poolKey, pooled);
+    context.once("close", () => {
+      if (state.contexts.get(poolKey) === pooled) state.contexts.delete(poolKey);
+    });
     state.metrics.contextsCreated++;
     state.lastActivity = Date.now();
     resetIdleTimer();
@@ -407,6 +424,19 @@ export async function acquireBrowserContext(key, options) {
 
 export async function openPage(pooled) {
   return pooled.context.newPage();
+}
+
+/** Keep a context alive until its request (including streaming) has finished. */
+export function retainBrowserContext(pooled) {
+  pooled.activeUses++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    pooled.activeUses--;
+    pooled.lastUsed = Date.now();
+    if (state.contexts.get(pooled.id) === pooled) resetIdleTimer();
+  };
 }
 
 export async function releaseBrowserContext(key) {
