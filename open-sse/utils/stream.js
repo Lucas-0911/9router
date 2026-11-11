@@ -179,6 +179,11 @@ export function createSSEStream(options = {}) {
           let injectedUsage = false;
           let responsesTerminal = false;
 
+          if (trimmed.startsWith("data:") && trimmed.slice(5).trim() === "[DONE]") {
+            if (streamDoneSent) continue;
+            streamDoneSent = true;
+          }
+
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
               let parsed = JSON.parse(trimmed.slice(5).trim());
@@ -477,7 +482,8 @@ export function createSSEStream(options = {}) {
         if (remaining) buffer += remaining;
 
         if (mode === STREAM_MODE.PASSTHROUGH) {
-          if (buffer) {
+          // An unterminated sentinel is emitted below if none was forwarded.
+          if (buffer && !/^\s*data:\s*\[DONE\]\s*$/.test(buffer)) {
             let output = buffer;
             if (buffer.startsWith("data:") && !buffer.startsWith("data: ")) {
               output = "data: " + buffer.slice(5);
