@@ -1,3 +1,6 @@
+import { OPTIONAL_COOKIES, REQUIRED_COOKIES } from "./windows205.js";
+import { MUSE_QUOTA_REASON } from "../../config/museWeb.js";
+
 // muse.ai session facts: cookie parsing and the /api/session renewal flow.
 //
 // Everything here was observed from the public web client and may change
@@ -9,36 +12,48 @@ const NEW_THREAD_URL = `${SITE}/thread/new`;
 const SESSION_API = `${SITE}/api/session`;
 const VM_WAKE_API = `${SITE}/api/hatch/vm/wake`;
 
-// Cookies that together make up a logged-in session.
-const SESSION_COOKIES = ["hatch_sess", "hatch_gw", "hatch_vml", "hatch_native_auth_device"];
+// hatch_sess is the only cookie Windows 2.0.5 requires. The rest are optional.
+const SESSION_COOKIES = [...REQUIRED_COOKIES, ...OPTIONAL_COOKIES];
 
+// engine.py renew_session_http pins this Chrome/141 Windows agent.
 const MUSE_USER_AGENT =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-  "Chrome/140.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/141.0.0.0 Safari/537.36";
+
+// Cleared by muse.ai only when the session itself is dead. hatch_gw may expire.
+const ESSENTIAL_COOKIES = new Set(["hatch_sess", "hatch_vml", "hatch_native_auth_device"]);
+const AUTH_STATUSES = new Set([401, 403, 301, 302, 303, 307, 308]);
 
 // Error kinds the executor maps to HTTP statuses.
 export class MuseWebAuthError extends Error {
-  constructor(message) {
+  constructor(message, status = 401) {
     super(message);
     this.name = "MuseWebAuthError";
+    this.status = status;
   }
 }
 export class MuseWebUpstreamError extends Error {
   constructor(message) {
     super(message);
     this.name = "MuseWebUpstreamError";
+    this.status = 502;
   }
 }
 export class MuseWebQuotaError extends Error {
   constructor(message) {
     super(message);
     this.name = "MuseWebQuotaError";
+    this.status = 429;
+    this.autoDisable = true;
+    this.consumeMediaRetry = false;
+    this.reason = MUSE_QUOTA_REASON;
   }
 }
 export class MuseWebTimeoutError extends Error {
   constructor(message) {
     super(message);
     this.name = "MuseWebTimeoutError";
+    this.status = 504;
   }
 }
 
@@ -80,24 +95,31 @@ export function cookieHeaderOf(pairs) {
     .join("; ");
 }
 
-/** Missing required session cookies (empty list when the session looks complete). */
+/** Missing required session cookies. Optional hatch_* cookies are not required. */
 export function missingSessionCookies(pairs) {
   const names = new Set(pairs.map((p) => p.name));
-  return SESSION_COOKIES.filter((name) => !names.has(name));
+  return REQUIRED_COOKIES.filter((name) => !names.has(name));
 }
 
-/** Playwright addCookies() shape for the .muse.ai domain. */
+/**
+ * Playwright addCookies() shape for muse.ai.
+ * Omit `expires`. CDP Storage.setCookies rejects `-1`, and a past expiry makes
+ * Chromium drop hatch_vml. A missing expiry is a session cookie.
+ * `__Host-` cookies are host-only; a Domain attribute fails the whole batch.
+ */
 export function toMuseCookies(header) {
-  return parseCookiePairs(header).map(({ name, value }) => ({
-    name,
-    value,
-    domain: ".muse.ai",
-    path: "/",
-    secure: true,
-    httpOnly: false,
-    sameSite: "Lax",
-    expires: -1,
-  }));
+  return parseCookiePairs(header).map(({ name, value }) => {
+    const hostOnly = name.startsWith("__Host-");
+    return {
+      name,
+      value,
+      domain: hostOnly ? "muse.ai" : ".muse.ai",
+      path: "/",
+      secure: true,
+      httpOnly: false,
+      sameSite: "Lax",
+    };
+  });
 }
 
 function readSetCookies(response) {
@@ -123,28 +145,62 @@ function parseSetCookieExpires(line) {
   return Number.isFinite(ts) ? Math.floor(ts / 1000) : 0;
 }
 
+function applySetCookies(response, jar) {
+  // muse.ai rotates hatch_vml by clearing the host cookie and setting the
+  // domain cookie in the same response. A clear counts only when that name
+  // is still absent after every Set-Cookie line is applied.
+  for (const line of readSetCookies(response)) {
+    const pair = parseSetCookieLine(line);
+    if (!pair) continue;
+    const low = line.toLowerCase();
+    const cleared = !pair.value || low.includes("max-age=0");
+    if (cleared) {
+      delete jar[pair.name];
+      continue;
+    }
+    const expires = parseSetCookieExpires(line);
+    if (expires && expires <= Date.now() / 1000) {
+      delete jar[pair.name];
+      continue;
+    }
+    jar[pair.name] = pair.value;
+  }
+  if (!jar.hatch_sess) {
+    throw new MuseWebAuthError("muse.ai đã xóa cookie hatch_sess (session hết hạn)");
+  }
+}
+
 /**
  * Hit the session endpoint, which rotates short-lived cookies via Set-Cookie,
  * and optionally wake the account's cloud workspace so the first request is fast.
  *
  * @returns {Promise<{ cookieHeader: string, jar: Object<string,string>, meta: object }>}
- * @throws {MuseWebAuthError} session rejected (HTTP 401/403)
- * @throws {MuseWebUpstreamError} other non-2xx from the session endpoint
+ * @throws {MuseWebAuthError} HTTP 401/403, a redirect, a cleared essential cookie, or signed-out JSON
+ * @throws {MuseWebUpstreamError} network errors and HTTP >= 500. The account stays enabled.
  */
 export async function renewSession(rawCookieHeader, { wakeVm = true, timeoutMs = 15000, signal } = {}) {
+  signal?.throwIfAborted();
+  const deadline = AbortSignal.timeout(timeoutMs);
+  signal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   const jar = {};
   for (const { name, value } of parseCookiePairs(rawCookieHeader)) jar[name] = value;
+  if (!jar.hatch_sess) {
+    throw new MuseWebAuthError("Thiếu cookie bắt buộc: hatch_sess");
+  }
+
+  const sessionHeaders = () => ({
+    "User-Agent": MUSE_USER_AGENT,
+    Origin: SITE,
+    Referer: `${SITE}/`,
+    Accept: "application/json, text/plain, */*",
+    Cookie: cookieHeaderOf(Object.entries(jar).map(([name, value]) => ({ name, value }))),
+  });
 
   let response;
   try {
     response = await fetch(SESSION_API, {
-      headers: {
-        "User-Agent": MUSE_USER_AGENT,
-        Origin: SITE,
-        Referer: NEW_THREAD_URL,
-        Accept: "application/json",
-        Cookie: cookieHeaderOf(Object.entries(jar).map(([name, value]) => ({ name, value }))),
-      },
+      headers: sessionHeaders(),
+      redirect: "manual",
       signal,
     });
   } catch (error) {
@@ -152,16 +208,15 @@ export async function renewSession(rawCookieHeader, { wakeVm = true, timeoutMs =
     throw new MuseWebUpstreamError(`muse.ai session endpoint unreachable: ${error.message}`);
   }
 
-  if (response.status === 401 || response.status === 403) {
-    throw new MuseWebAuthError(`muse.ai session rejected (HTTP ${response.status}); cookies are no longer valid`);
+  applySetCookies(response, jar);
+  if (AUTH_STATUSES.has(response.status)) {
+    throw new MuseWebAuthError(
+      `muse.ai session rejected (HTTP ${response.status}); cookies are no longer valid`,
+      response.status,
+    );
   }
-  if (response.status >= 400) {
+  if (response.status >= 400 || response.status === 0) {
     throw new MuseWebUpstreamError(`muse.ai session endpoint returned HTTP ${response.status}`);
-  }
-
-  for (const line of readSetCookies(response)) {
-    const pair = parseSetCookieLine(line);
-    if (pair?.value) jar[pair.name] = pair.value;
   }
 
   let bodyJson = {};
@@ -169,7 +224,14 @@ export async function renewSession(rawCookieHeader, { wakeVm = true, timeoutMs =
     const contentType = response.headers.get("content-type") || "";
     if (contentType.startsWith("application/json")) bodyJson = await response.json();
   } catch {
+    signal.throwIfAborted();
     /* non-JSON body — meta stays empty */
+  }
+  if (
+    bodyJson.authenticated === false
+    || (Object.prototype.hasOwnProperty.call(bodyJson, "user") && bodyJson.user == null && !bodyJson.session)
+  ) {
+    throw new MuseWebAuthError("/api/session báo chưa đăng nhập (user=null)");
   }
 
   const meta = {
@@ -183,21 +245,27 @@ export async function renewSession(rawCookieHeader, { wakeVm = true, timeoutMs =
       const wake = await fetch(VM_WAKE_API, {
         method: "POST",
         headers: {
-          "User-Agent": MUSE_USER_AGENT,
-          Origin: SITE,
-          Referer: NEW_THREAD_URL,
+          ...sessionHeaders(),
           "Content-Type": "application/json",
-          Cookie: cookieHeaderOf(Object.entries(jar).map(([name, value]) => ({ name, value }))),
         },
         body: JSON.stringify({
           vm_id: meta.vm_id,
           retry_count: 0,
           connect_attempt_id: crypto.randomUUID(),
         }),
+        redirect: "manual",
         signal,
       });
+      applySetCookies(wake, jar);
+      if (wake.status === 401 || wake.status === 403) {
+        throw new MuseWebAuthError(
+          `muse.ai session rejected (HTTP ${wake.status}); cookies are no longer valid`,
+          wake.status,
+        );
+      }
       meta.vm_wake_ok = wake.status === 200;
-    } catch {
+    } catch (error) {
+      if (signal?.aborted || error instanceof MuseWebAuthError) throw error;
       meta.vm_wake_ok = false;
     }
   }

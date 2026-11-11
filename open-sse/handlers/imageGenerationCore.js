@@ -32,6 +32,7 @@ export async function handleImageGenerationCore({
   modelInfo,
   credentials,
   log,
+  signal,
   streamToClient = false,
   binaryOutput = false,
   onCredentialsRefreshed,
@@ -56,7 +57,8 @@ export async function handleImageGenerationCore({
   if (adapter.useExecutor && adapter.executeViaExecutor) {
     try {
       log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
-      const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
+      signal?.throwIfAborted();
+      const responseBody = await adapter.executeViaExecutor(model, body, credentials, log, { signal });
       if (onRequestSuccess) await onRequestSuccess();
       const normalized = adapter.normalize(responseBody, body.prompt);
       const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : responseBody;
@@ -87,7 +89,7 @@ export async function handleImageGenerationCore({
         }),
       };
     } catch (error) {
-      const status = error.status || HTTP_STATUS.BAD_GATEWAY;
+      const status = signal?.aborted ? 499 : error.status || HTTP_STATUS.BAD_GATEWAY;
       const errMsg = formatProviderError(error, provider, model, status);
       log?.debug?.("IMAGE", `Executor error: ${errMsg}`);
       return createErrorResult(status, errMsg, error.resetsAtMs);

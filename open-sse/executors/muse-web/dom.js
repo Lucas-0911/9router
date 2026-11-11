@@ -49,15 +49,13 @@ export const PAGE_STATE = `(() => {
 })()`;
 
 // Snapshot of the conversation used to detect new output after sending.
-export const CHAT_STATE = `(() => {
-  const scrollers = [...document.querySelectorAll('*')].filter(e => {
-    const s = getComputedStyle(e);
-    return (s.overflowY === 'auto' || s.overflowY === 'scroll') && e.scrollHeight > e.clientHeight + 50;
-  });
-  scrollers.forEach(e => { e.scrollTop = e.scrollHeight; });
+function chatStateScript(media) {
+  return `(() => {
   const bubbles = [...document.querySelectorAll(${q(AGENT_BUBBLE)})];
-  const last = bubbles.length ? (bubbles[bubbles.length - 1].innerText || '').trim() : '';
-  const atts = [...document.querySelectorAll(${q(ATTACHMENT)})].map(a => {
+  const lastEl = bubbles.length ? bubbles[bubbles.length - 1] : null;
+  const last = lastEl ? (lastEl.innerText || '').trim() : '';
+  const generating = !!document.querySelector(${q(STOP_BUTTON)});
+  const atts = ${media ? `[...document.querySelectorAll(${q(ATTACHMENT)})].map(a => {
     const v = a.querySelector('video'), i = a.querySelector('img');
     const m = v || i;
     return {
@@ -67,12 +65,20 @@ export const CHAT_STATE = `(() => {
       w: m ? (m.videoWidth || m.naturalWidth || 0) : 0,
       h: m ? (m.videoHeight || m.naturalHeight || 0) : 0,
     };
-  });
-  const tail = document.body ? document.body.innerText.slice(-600) : '';
+  })` : "[]"};
+  const tail = !generating && !last && document.body ? document.body.innerText.slice(-600) : '';
   return { agentCount: bubbles.length, lastText: last,
-            generating: !!document.querySelector(${q(STOP_BUTTON)}),
+            generating,
             approval: !!document.querySelector(${q(APPROVAL_CARD)}),
             attachments: atts, tail };
+})()`;
+}
+
+export const CHAT_STATE = chatStateScript(false);
+export const MEDIA_STATE = chatStateScript(true);
+export const SCROLL_LAST_REPLY = `(() => {
+  const bubbles = document.querySelectorAll(${q(AGENT_BUBBLE)});
+  bubbles[bubbles.length - 1]?.scrollIntoView({ block: 'end' });
 })()`;
 
 // Click "Deny" on every pending approval card; the agent then carries on without
@@ -150,6 +156,58 @@ export function attachFileScript(b64, mime, filename) {
   } catch (e) { return { ok: false, err: String(e) }; }
 })()`;
 }
+
+// engine.py quota panel. These return a click point, dialog text, or "".
+export const QUOTA_SETTINGS_JS = `(() => {
+        const visible = e => e.getClientRects().length > 0
+            && getComputedStyle(e).visibility !== 'hidden';
+        const labels = ['Settings', '設定', '设置', 'Cài đặt'];
+        const b = [...document.querySelectorAll('[data-testid="hatch-dock-more"]')].find(visible)
+            || [...document.querySelectorAll('button,[role=button]')].find(e =>
+                visible(e) && labels.includes((e.getAttribute('aria-label') || '').trim()));
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)});
+    })()`;
+
+export const QUOTA_MENU_JS = `(() => {
+        const visible = e => e.getClientRects().length > 0
+            && getComputedStyle(e).visibility !== 'hidden';
+        const labels = ['Settings', '設定', '设置', 'Cài đặt'];
+        const exact = e => labels.includes((e.textContent || '').trim());
+        const b = [...document.querySelectorAll('[role=menuitem]')].find(e =>
+            visible(e) && (exact(e) || [...e.querySelectorAll('span,div')].some(exact)))
+            || [...document.querySelectorAll('[role=menu] button,[role=menu] span,[role=menu] div')]
+                .find(e => visible(e) && exact(e));
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)});
+    })()`;
+
+export const QUOTA_DIALOG_JS = `(() => {
+        const d = [...document.querySelectorAll('[role=dialog],[aria-modal=true]')]
+            .find(e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden');
+        return d ? (d.innerText || '') : '';
+    })()`;
+
+export const QUOTA_CLOSE_JS = `(() => {
+        const visible = e => e.getClientRects().length > 0
+            && getComputedStyle(e).visibility !== 'hidden';
+        const d = [...document.querySelectorAll('[role=dialog],[aria-modal=true]')].find(visible);
+        if (!d) return '';
+        const labels = /^(close|đóng|关闭|關閉|閉じる|cerrar|fermer|schliessen|schließen)$/i;
+        const b = [...d.querySelectorAll('button,[role=button]')].find(e =>
+            visible(e) && labels.test((e.getAttribute('aria-label') || '').trim()));
+        if (!b) return '';
+        const r = b.getBoundingClientRect();
+        return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)});
+    })()`;
+
+export const QUOTA_STILL_OPEN_JS = `(() => {
+        const d = [...document.querySelectorAll('[role=dialog],[aria-modal=true]')]
+            .find(e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden');
+        return d ? '1' : '';
+    })()`;
 
 export function fetchAsBase64Script(url) {
   // Fetch a (possibly blob:) URL inside the page context and return base64 bytes.

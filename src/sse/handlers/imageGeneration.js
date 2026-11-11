@@ -83,7 +83,7 @@ export async function handleImageGeneration(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname, signal: request.signal }),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -91,10 +91,10 @@ export async function handleImageGeneration(request) {
     });
   }
 
-  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname });
+  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname, signal: request.signal });
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint } = {}) {
+async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint, signal } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -107,6 +107,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       modelInfo: { provider, model },
       credentials: null,
       binaryOutput,
+      signal,
     });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "Image generation failed");
@@ -118,6 +119,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
   let lastStatus = null;
 
   while (true) {
+    if (signal?.aborted) return errorResponse(499, "Request aborted");
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { preferredConnectionId });
 
     if (!credentials || credentials.allRateLimited) {
@@ -151,6 +153,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       credentials: refreshedCredentials,
       streamToClient: wantsStream,
       binaryOutput,
+      signal,
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           accessToken: newCreds.accessToken,
@@ -179,7 +182,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       }
     });
 
-    if (result.success) return result.response;
+    if (result.success || signal?.aborted) return result.response;
 
     const { shouldFallback } = await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model);
 
