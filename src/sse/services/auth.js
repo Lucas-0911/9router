@@ -2,6 +2,10 @@ import { getProviderConnections, validateApiKey, updateProviderConnection, getSe
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
+import {
+  MUSE_WEB_BUSY, MUSE_QUOTA_BADGE, MUSE_QUOTA_REASON,
+  SESSION_EXPIRED_BADGE, SESSION_EXPIRED_REASON,
+} from "open-sse/config/museWeb.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
@@ -246,9 +250,56 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  */
 export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
+  const text = typeof errorText === "string" ? errorText : JSON.stringify(errorText || "");
+  if (resolveProviderId(provider) === "muse-web" && Number(status) === 429 && text.includes(MUSE_WEB_BUSY)) {
+    return { shouldFallback: true, cooldownMs: 0 };
+  }
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
   const backoffLevel = conn?.backoffLevel || 0;
+
+  // Windows 2.0.5: confirmed token exhaustion turns the account off and the
+  // request moves to another account. This is not a media retry.
+  if (resolveProviderId(provider) === "muse-web") {
+    if (Number(status) === 429 && text.includes(MUSE_QUOTA_BADGE)) {
+      const previous = conn?.providerSpecificData && typeof conn.providerSpecificData === "object"
+        ? conn.providerSpecificData
+        : {};
+      await updateProviderConnection(connectionId, {
+        isActive: false,
+        testStatus: "unavailable",
+        lastError: MUSE_QUOTA_BADGE,
+        errorCode: status || 429,
+        lastErrorAt: new Date().toISOString(),
+        backoffLevel: 0,
+        providerSpecificData: {
+          ...previous,
+          auto_disabled_reason: MUSE_QUOTA_REASON,
+        },
+      });
+      log.warn("AUTH", `${conn?.name || connectionId.slice(0, 8)} ${MUSE_QUOTA_BADGE}`);
+      return { shouldFallback: true, cooldownMs: 0, consumeMediaRetry: false };
+    }
+    if (Number(status) === 401 && text.includes(SESSION_EXPIRED_BADGE)) {
+      const previous = conn?.providerSpecificData && typeof conn.providerSpecificData === "object"
+        ? conn.providerSpecificData
+        : {};
+      await updateProviderConnection(connectionId, {
+        isActive: false,
+        testStatus: "unavailable",
+        lastError: SESSION_EXPIRED_BADGE,
+        errorCode: status || 401,
+        lastErrorAt: new Date().toISOString(),
+        backoffLevel: 0,
+        providerSpecificData: {
+          ...previous,
+          auto_disabled_reason: SESSION_EXPIRED_REASON,
+        },
+      });
+      log.warn("AUTH", `${conn?.name || connectionId.slice(0, 8)} ${SESSION_EXPIRED_BADGE}`);
+      return { shouldFallback: true, cooldownMs: 0 };
+    }
+  }
 
   // GitHub premium-request exhaustion is account-wide until the next UTC month.
   const githubResetAtMs = githubMonthlyResetMs(status, errorText, provider);
