@@ -8,14 +8,19 @@
 // Auth: cookie-based (hatch_sess + rotating hatch_gw/hatch_vml/...) from muse.ai
 // Method: /api/session renewal (plain HTTP) + Playwright DOM automation
 //
-// Session renewal rotates the cookie jar via Set-Cookie on every request; the
-// rotated jar is re-seeded into the pooled browser context each time.
+// Session checks are briefly cached per context. Each account keeps one hydrated
+// /thread/new page after a successful chat so the next request skips navigation.
+// A page that already has a conversation is never reused.
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { BaseExecutor } from "./base.js";
 import { SSE_DONE, SSE_HEADERS_NO_BUFFER } from "../utils/sseConstants.js";
 import { isMissingBrowserExecutable, resolveSystemChromeExecutable } from "./browserExecutableCheck.js";
-import { acquireBrowserContext, releaseBrowserContext } from "../services/browserPool.js";
+import { acquireBrowserContext, releaseBrowserContext, retainBrowserContext } from "../services/browserPool.js";
+import { fetchImageAsBase64, parseDataUri } from "../translator/concerns/image.js";
+import { MAX_IMAGE_BYTES, FETCH_TIMEOUT_MS } from "../config/mediaConfig.js";
+import { MUSE_WEB_BUSY, MUSE_WEB_TIMEOUTS } from "../config/museWeb.js";
 import {
   NEW_THREAD_URL,
   parseCookiePairs,
@@ -28,6 +33,8 @@ import {
 } from "./muse-web/session.js";
 import { flattenMessages } from "./muse-web/prompt.js";
 import * as dom from "./muse-web/dom.js";
+import { decideQuotaDisable, parseQuotaPanel, MUSE_QUOTA_BADGE } from "./muse-web/windows205.js";
+import { confirmSessionDead, SESSION_EXPIRED_BADGE } from "./muse-web/sessionGuard.js";
 
 export { isMissingBrowserExecutable } from "./browserExecutableCheck.js";
 
@@ -35,15 +42,18 @@ export { isMissingBrowserExecutable } from "./browserExecutableCheck.js";
 
 const DEFAULT_MODEL_ID = "muse-chat";
 
-const PAGE_READY_TIMEOUT_MS = 45000;
-const POLL_INTERVAL_MS = 300;
-// Polls with unchanged text before the reply counts as finished. FORCE fires
-// even while the stop button is still up (the UI occasionally leaves it stuck).
-const STABLE_POLLS_DONE = 4;
-const STABLE_POLLS_FORCE = 12;
-const STALL_AFTER_MS = 15000;
-const FIRST_TOKEN_TIMEOUT_MS = 45000;
-const CHAT_TIMEOUT_MS = 300000;
+const {
+  sessionReuse: SESSION_REUSE_MS,
+  pageReady: PAGE_READY_TIMEOUT_MS, pollMin: POLL_INTERVAL_MS,
+  pollMax: MAX_POLL_INTERVAL_MS, textStable: TEXT_STABLE_MS,
+  stall: STALL_AFTER_MS, firstToken: FIRST_TOKEN_TIMEOUT_MS, chat: CHAT_TIMEOUT_MS,
+  image: IMAGE_TIMEOUT_MS, video: VIDEO_TIMEOUT_MS,
+} = MUSE_WEB_TIMEOUTS;
+// shortcut: Account slots are process-local; use shared leases before running multiple gateway processes.
+const activeAccounts = new Set();
+const sessions = new Map();
+const warmThreads = new Map();
+const WARM_THREAD_MS = 60_000;
 
 // muse.ai posts a completion sentence ("Here's your video…") a few seconds
 // before the media attachment's blob src is ready, so a reply that is "text
@@ -55,11 +65,9 @@ const MEDIA_GRACE = { video: 90000, image: 8000 };
 // a minute later, and the failover started the whole generation over.
 const OVERRUN_FACTOR = 2.5;
 const MEDIA_POLL_MS = 600;
-const IMAGE_TIMEOUT_MS = 240000;
-const VIDEO_TIMEOUT_MS = 600000;
 const MAX_CHAT_IMAGES = 8;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms, signal) => delay(ms, undefined, { signal });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -81,11 +89,11 @@ function formatChatCompletion(content, model, finishReason = "stop") {
   };
 }
 
-function formatStreamChunk(content, model, finishReason = null) {
+function formatStreamChunk(content, model, id, created, finishReason = null) {
   return {
-    id: `chatcmpl-muw-${Date.now()}`,
+    id,
     object: "chat.completion.chunk",
-    created: Math.floor(Date.now() / 1000),
+    created,
     model,
     choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finishReason }],
   };
@@ -113,16 +121,117 @@ function statusForError(error) {
   if (error instanceof MuseWebAuthError) return 401;
   if (error instanceof MuseWebQuotaError) return 429;
   if (error instanceof MuseWebTimeoutError) return 504;
+  if (error?.name === "TimeoutError") return 504;
   if (error instanceof MuseWebUpstreamError) return 502;
+  if (error?.message === MUSE_WEB_BUSY) return 429;
   if (error?.name === "AbortError" || /aborted/i.test(error?.message || "")) return 499;
   return 500;
 }
 
-async function waitForThreadReady(page) {
+function freshThreadPath(page, state) {
+  const reported = typeof state?.path === "string" ? state.path : "";
+  if (reported) return reported;
+  try {
+    return new URL(page.url()).pathname;
+  } catch {
+    return "";
+  }
+}
+
+function isUsableFreshThread(page, state) {
+  const head = String(state?.head || "").toLowerCase();
+  if (!state?.ready || dom.LOGIN_HINTS.some((hint) => head.includes(hint))) return false;
+  return freshThreadPath(page, state) === "/thread/new";
+}
+
+function isEmptyThread(chat) {
+  return !chat?.generating && !chat?.agentCount && !String(chat?.lastText || "").trim();
+}
+
+function clearWarmTimer(warm) {
+  if (warm?.timer) clearTimeout(warm.timer);
+}
+
+async function discardWarmThread(key) {
+  const warm = warmThreads.get(key);
+  if (!warm) return;
+  warmThreads.delete(key);
+  clearWarmTimer(warm);
+  await warm.page.close().catch(() => {});
+  warm.releaseContext();
+}
+
+function scheduleWarmThread(key, page, context, releaseContext, log) {
+  const previous = warmThreads.get(key);
+  if (previous) {
+    warmThreads.delete(key);
+    clearWarmTimer(previous);
+    void previous.page.close().catch(() => {});
+    previous.releaseContext();
+  }
+  const warm = { page, context, releaseContext, timer: null };
+  const ready = (async () => {
+    await page.goto(NEW_THREAD_URL, { waitUntil: "domcontentloaded", timeout: PAGE_READY_TIMEOUT_MS });
+    await waitForThreadReady(page);
+    const state = (await page.evaluate(dom.PAGE_STATE)) || {};
+    if (!isUsableFreshThread(page, state)) throw new Error("warm thread is not a fresh composer");
+    const chat = (await page.evaluate(dom.CHAT_STATE)) || {};
+    if (!isEmptyThread(chat)) throw new Error("warm thread is not empty");
+  })();
+  warm.ready = ready;
+  warmThreads.set(key, warm);
+  warm.timer = setTimeout(() => { void discardWarmThread(key); }, WARM_THREAD_MS);
+  warm.timer.unref?.();
+  ready.then(() => {
+    if (warmThreads.get(key) === warm) log?.info?.("MUSE-WEB", "warm thread parked");
+  }, () => {
+    if (warmThreads.get(key) === warm) void discardWarmThread(key);
+  });
+}
+
+async function claimWarmThread(key, context) {
+  const warm = warmThreads.get(key);
+  if (!warm || warm.context !== context) return null;
+  warmThreads.delete(key);
+  clearWarmTimer(warm);
+  try {
+    await warm.ready;
+    if (warm.page.isClosed?.()) throw new Error("closed");
+    const state = (await warm.page.evaluate(dom.PAGE_STATE)) || {};
+    if (!isUsableFreshThread(warm.page, state)) throw new Error("stale");
+    const chat = (await warm.page.evaluate(dom.CHAT_STATE)) || {};
+    if (!isEmptyThread(chat)) throw new Error("dirty");
+    warm.releaseContext();
+    return warm.page;
+  } catch {
+    await warm.page.close().catch(() => {});
+    warm.releaseContext();
+    return null;
+  }
+}
+
+function reserveAccount(credentials) {
+  const rawCookie = resolveMuseCookie(credentials);
+  const sessionCookie = parseCookiePairs(rawCookie).find(({ name }) => name === "hatch_sess")?.value;
+  if (!sessionCookie) {
+    throw new MuseWebAuthError("Missing muse.ai hatch_sess cookie");
+  }
+  const key = credentials?.connectionId || createHash("sha256").update(sessionCookie).digest("hex");
+  if (activeAccounts.has(key)) throw Object.assign(new Error(MUSE_WEB_BUSY), { status: 429 });
+  activeAccounts.add(key);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeAccounts.delete(key);
+  };
+}
+
+async function waitForThreadReady(page, signal) {
   const deadline = Date.now() + PAGE_READY_TIMEOUT_MS;
   let state = {};
   while (Date.now() < deadline) {
-    await sleep(250);
+    signal?.throwIfAborted();
     // A busy page can leave evaluate unanswered while it loads; poll again.
     try {
       state = (await page.evaluate(dom.PAGE_STATE)) || {};
@@ -130,6 +239,10 @@ async function waitForThreadReady(page) {
     } catch {
       /* page navigating — poll again */
     }
+    if (!state.hasInput && dom.LOGIN_HINTS.some((hint) => (state.head || "").toLowerCase().includes(hint))) {
+      throw new MuseWebAuthError("muse.ai redirected to login; cookies are no longer valid");
+    }
+    await sleep(150, signal);
   }
   const head = (state.head || "").toLowerCase();
   if (dom.LOGIN_HINTS.some((h) => head.includes(h))) {
@@ -138,20 +251,83 @@ async function waitForThreadReady(page) {
   throw new MuseWebTimeoutError("muse.ai page did not become ready");
 }
 
-async function readChatState(page) {
-  const state = (await page.evaluate(dom.CHAT_STATE)) || {};
-  const tail = state.tail || "";
-  const low = tail.toLowerCase();
-  const hit = dom.QUOTA_HINTS.find((h) => low.includes(h));
-  if (hit) {
-    const i = low.indexOf(hit);
-    const snippet = tail.slice(Math.max(0, i - 120), i + 120).trim().split(/\s+/).join(" ");
-    // The page tail also holds the prompt and the thread-history sidebar, and
-    // matching it cooled down accounts whose images muse.ai went on to deliver.
-    // Only a finished agent reply that says so counts.
-    const reply = state.lastText || "";
-    if (!state.generating && reply.toLowerCase().includes(hit)) {
-      throw new MuseWebQuotaError(`muse.ai reports the account is out of quota: …${snippet}…`);
+async function clickQuotaPoint(page, expr, timeoutMs, signal) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    signal?.throwIfAborted();
+    const raw = await page.evaluate(expr);
+    const pt = typeof raw === "string" && raw.startsWith("{") ? JSON.parse(raw) : null;
+    if (pt && Number.isFinite(pt.x) && Number.isFinite(pt.y)) {
+      await page.mouse.click(pt.x, pt.y);
+      return true;
+    }
+    await sleep(200, signal);
+  }
+  return false;
+}
+
+async function dismissQuotaUi(page, signal) {
+  signal?.throwIfAborted();
+  for (let i = 0; i < 2; i++) {
+    await page.keyboard.press("Escape").catch(() => {});
+    await sleep(100, signal);
+  }
+  if (await page.evaluate(dom.QUOTA_STILL_OPEN_JS)) {
+    const raw = await page.evaluate(dom.QUOTA_CLOSE_JS);
+    const pt = typeof raw === "string" && raw.startsWith("{") ? JSON.parse(raw) : null;
+    if (pt && Number.isFinite(pt.x)) await page.mouse.click(pt.x, pt.y);
+    else await page.mouse.click(20, 20).catch(() => {});
+  }
+}
+
+// engine.py quota(), then the runner keeps the account unless the panel is exhausted.
+// A dead tab or a missing dialog returns null. That is not proof of remaining tokens.
+async function readQuotaPanel(page, signal) {
+  signal?.throwIfAborted();
+  try {
+    await dismissQuotaUi(page, signal);
+    if (!(await clickQuotaPoint(page, dom.QUOTA_SETTINGS_JS, 8000, signal))) return null;
+    if (!(await clickQuotaPoint(page, dom.QUOTA_MENU_JS, 8000, signal))) return null;
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      signal?.throwIfAborted();
+      const text = await page.evaluate(dom.QUOTA_DIALOG_JS);
+      const parsed = parseQuotaPanel(typeof text === "string" ? text : "");
+      if (parsed.found) return parsed;
+      await sleep(200, signal);
+    }
+    return null;
+  } catch (error) {
+    if (signal?.aborted || error?.name === "AbortError") throw error;
+    return null;
+  } finally {
+    await dismissQuotaUi(page, signal).catch(() => {});
+  }
+}
+
+async function throwIfQuotaConfirmed(page, decision, signal) {
+  if (decision.disable) {
+    throw new MuseWebQuotaError(`${MUSE_QUOTA_BADGE} (weekly 100% + 0 extra)`);
+  }
+  if (!decision.needsQuotaRead) return;
+  const quota = await readQuotaPanel(page, signal);
+  if (decideQuotaDisable({ quota: quota || { found: false } }).disable) {
+    throw new MuseWebQuotaError(`${MUSE_QUOTA_BADGE} (weekly 100% + 0 extra)`);
+  }
+}
+
+async function readChatState(page, prompt = "", media = false) {
+  const state = (await page.evaluate(media ? dom.MEDIA_STATE : dom.CHAT_STATE)) || {};
+  // A phrase in the bubble is not the Usage panel. Disable only when that
+  // panel was already parsed into the page text and the numbers are exhausted.
+  if (!state.generating) {
+    const decision = decideQuotaDisable({
+      replyText: state.lastText || "",
+      pageText: state.tail || "",
+      prompt,
+    });
+    if (decision.disable) {
+      throw new MuseWebQuotaError(`${MUSE_QUOTA_BADGE} (weekly 100% + 0 extra)`);
     }
   }
   return state;
@@ -161,48 +337,44 @@ async function denyApprovals(page) {
   await page.evaluate(dom.DENY_APPROVALS);
 }
 
-async function sendPrompt(page, prompt) {
+async function sendPrompt(page, prompt, signal) {
+  signal?.throwIfAborted();
   const res = await page.evaluate(dom.fillInputScript(prompt));
   if (!res?.ok) throw new MuseWebUpstreamError(`cannot fill muse.ai chat input: ${res?.err}`);
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     if ((await page.evaluate(dom.CLICK_SEND)) === "clicked") return;
-    await sleep(100);
+    await sleep(100, signal);
   }
   await page.keyboard.press("Enter");
-  await sleep(500);
+  await sleep(500, signal);
   if (!(await page.evaluate(dom.INPUT_EMPTY))) {
     throw new MuseWebUpstreamError("send button not found and Enter did not submit");
   }
 }
 
-async function resolveImageRef(ref) {
-  const dataUri = String(ref).match(/^data:(image\/[^;]+);base64,(.+)$/);
-  if (dataUri) return { b64: dataUri[2], mime: dataUri[1] };
-  if (/^https?:/i.test(ref)) {
-    // Some hosts (CDNs, wikimedia) reject the default undici UA with 4xx.
-    const r = await fetch(ref, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-        Accept: "image/*",
-      },
-    });
-    if (!r.ok) return null;
-    const buf = Buffer.from(await r.arrayBuffer());
-    const mime = (r.headers.get("content-type") || "").split(";")[0].trim() || "image/png";
-    if (!mime.startsWith("image/")) return null;
-    return { b64: buf.toString("base64"), mime };
+async function resolveImageRef(ref, signal) {
+  if (typeof ref !== "string") return null;
+  let parsed = parseDataUri(ref);
+  if (!parsed) {
+    const deadline = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const result = await fetchImageAsBase64(ref, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    parsed = result && parseDataUri(result.url);
   }
-  return null;
+  signal?.throwIfAborted();
+  if (!parsed || !parsed.mimeType.startsWith("image/")) return null;
+  if (parsed.base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 || !/^[a-zA-Z0-9+/\r\n]*={0,2}$/.test(parsed.base64)) return null;
+  if (Buffer.byteLength(parsed.base64, "base64") > MAX_IMAGE_BYTES) return null;
+  return { b64: parsed.base64, mime: parsed.mimeType };
 }
 
-async function attachImages(page, images) {
+async function attachImages(page, images, signal) {
   if (!images?.length) return 0;
   let attached = 0;
   let failed = 0;
   for (const [idx, ref] of images.slice(0, MAX_CHAT_IMAGES).entries()) {
-    const img = await resolveImageRef(ref).catch(() => null);
+    signal?.throwIfAborted();
+    const img = await resolveImageRef(ref, signal);
     if (!img) {
       failed++;
       continue;
@@ -220,47 +392,66 @@ async function attachImages(page, images) {
       `could not download any input image (${failed} failed — check the URLs)`
     );
   }
-  if (attached) await sleep(1000);
+  if (attached) await sleep(1000, signal);
   return attached;
 }
 
 /**
  * Poll the agent bubble and emit text deltas until the reply is stable.
  *
- * Completion is text-stability based (the stop button sticks): unchanged text
- * for STABLE_POLLS_DONE polls while not generating, or STABLE_POLLS_FORCE
- * polls regardless. `onDelta` (when given) receives each incremental chunk.
+ * Unchanged text completes only after generating stops. Poll less while idle.
  */
-async function pollChat({ page, base, signal, onDelta }) {
+async function pollChat({ page, base, signal, onDelta, prompt = "" }) {
   const baseCount = base.agentCount || 0;
   const baseText = base.lastText || "";
   const started = Date.now();
   let emitted = "";
   let last = null;
-  let stable = 0;
+  let doneSince = null;
+  let pollMs = POLL_INTERVAL_MS;
   let gotFirst = false;
+  let quotaChecked = false;
+
+  const confirmQuota = async (state, stalled = false) => {
+    if (quotaChecked) return;
+    const decision = decideQuotaDisable({
+      replyText: state?.lastText || "",
+      pageText: state?.tail || "",
+      prompt,
+      stalled,
+    });
+    if (!decision.disable && !decision.needsQuotaRead) return;
+    quotaChecked = true;
+    await throwIfQuotaConfirmed(page, decision, signal);
+  };
 
   while (true) {
-    if (signal?.aborted) throw new Error("Request aborted");
+    signal?.throwIfAborted();
     const elapsed = Date.now() - started;
-    if (elapsed > CHAT_TIMEOUT_MS) throw new MuseWebTimeoutError("assistant reply timed out");
-    if (!gotFirst && elapsed > FIRST_TOKEN_TIMEOUT_MS) {
-      throw new MuseWebTimeoutError("no first token from assistant");
+    if (elapsed > CHAT_TIMEOUT_MS) {
+      await confirmQuota({ lastText: last || "" }, true);
+      throw new MuseWebTimeoutError("assistant reply timed out");
     }
-    await sleep(POLL_INTERVAL_MS);
 
-    const st = await readChatState(page);
+    const st = await readChatState(page, prompt);
+    if (!st.generating) await confirmQuota(st);
     if (st.approval) {
       await denyApprovals(page);
+      await sleep(pollMs, signal);
       continue;
     }
     const text = st.lastText || "";
     const isNew = (st.agentCount || 0) > baseCount || (text && text !== baseText);
     if (!isNew || !text) {
+      if (!gotFirst && !st.generating && elapsed > FIRST_TOKEN_TIMEOUT_MS) {
+        throw new MuseWebTimeoutError("no first token from assistant");
+      }
       const tail = st.tail || "";
       if (elapsed > STALL_AFTER_MS && dom.STALL_HINTS.some((h) => tail.includes(h))) {
         throw new MuseWebTimeoutError("upstream workspace is stuck connecting");
       }
+      pollMs = Math.min(MAX_POLL_INTERVAL_MS, pollMs + POLL_INTERVAL_MS);
+      await sleep(pollMs, signal);
       continue;
     }
     gotFirst = true;
@@ -271,13 +462,19 @@ async function pollChat({ page, base, signal, onDelta }) {
         onDelta?.(delta);
       }
       last = text;
-      stable = 0;
+      doneSince = null;
+      pollMs = POLL_INTERVAL_MS;
+      await page.evaluate(dom.SCROLL_LAST_REPLY);
     } else {
-      stable++;
-      if ((!st.generating && stable >= STABLE_POLLS_DONE) || stable >= STABLE_POLLS_FORCE) {
-        return emitted;
-      }
+      pollMs = Math.min(MAX_POLL_INTERVAL_MS, pollMs + POLL_INTERVAL_MS);
     }
+    if (st.generating) doneSince = null;
+    else {
+      doneSince ??= Date.now();
+      if (Date.now() - doneSince >= TEXT_STABLE_MS) return emitted;
+    }
+    const remaining = doneSince === null ? pollMs : TEXT_STABLE_MS - (Date.now() - doneSince);
+    await sleep(Math.min(pollMs, remaining), signal);
   }
 }
 
@@ -331,7 +528,7 @@ function pickMediaUrl(links, kind) {
  * order, to asking the agent to attach the file (it often leaves the final
  * file only in its workspace), then to a media link inside the reply bubble.
  */
-async function waitForMedia({ page, base, kind, timeoutMs, signal, log }) {
+async function waitForMedia({ page, base, kind, timeoutMs, signal, log, prompt = "" }) {
   const baseAtts = (base.attachments || []).length;
   let baseCount = base.agentCount || 0;
   const grace = MEDIA_GRACE[kind] ?? 8000;
@@ -341,14 +538,31 @@ async function waitForMedia({ page, base, kind, timeoutMs, signal, log }) {
   let askedToAttach = false;
   let busy = false;
   let elapsed = 0;
+  let quotaChecked = false;
+  let lastState = null;
+
+  const confirmQuota = async (state, stalled = false) => {
+    if (quotaChecked) return;
+    const decision = decideQuotaDisable({
+      replyText: state?.lastText || "",
+      pageText: state?.tail || "",
+      prompt,
+      stalled,
+    });
+    if (!decision.disable && !decision.needsQuotaRead) return;
+    quotaChecked = true;
+    await throwIfQuotaConfirmed(page, decision, signal);
+  };
 
   while (true) {
     elapsed = Date.now() - started;
     if (elapsed >= timeoutMs && !(busy && elapsed < timeoutMs * OVERRUN_FACTOR)) break;
-    if (signal?.aborted) throw new Error("Request aborted");
-    await sleep(MEDIA_POLL_MS);
+    signal?.throwIfAborted();
+    await sleep(MEDIA_POLL_MS, signal);
 
-    const st = await readChatState(page);
+    const st = await readChatState(page, prompt, true);
+    lastState = st;
+    if (!st.generating) await confirmQuota(st);
     if (st.approval) {
       await denyApprovals(page);
       denied = true;
@@ -381,7 +595,8 @@ async function waitForMedia({ page, base, kind, timeoutMs, signal, log }) {
           await sendPrompt(
             page,
             `Please attach the final ${kind} file here in the chat` +
-              (denied ? " instead of uploading it." : ", as a single attachment.")
+              (denied ? " instead of uploading it." : ", as a single attachment."),
+            signal
           );
           askedToAttach = true;
           textDoneAt = null;
@@ -401,6 +616,15 @@ async function waitForMedia({ page, base, kind, timeoutMs, signal, log }) {
     }
   }
   if (busy) log?.warn?.("MUSE-WEB", `${kind} still generating after ${Math.round(elapsed / 1000)}s; giving up`);
+  // A silent stall is not exhaustion. Re-read the Usage panel once; disable
+  // only when that read shows weekly 100% and no additional tokens.
+  if (!quotaChecked) {
+    const stalled = await readChatState(page, prompt, true).catch((error) => {
+      if (error instanceof MuseWebQuotaError) throw error;
+      return lastState;
+    });
+    await confirmQuota(stalled, true);
+  }
   throw new MuseWebTimeoutError(`${kind} generation timed out`);
 }
 
@@ -436,43 +660,127 @@ export class MuseWebExecutor extends BaseExecutor {
   }
 
   /**
-   * Renew the session over plain HTTP, acquire the pooled browser context
-   * seeded with the rotated cookies, and open a ready /thread/new page.
+   * Validate uncached sessions, acquire the pooled context with current cookies,
+   * and open a ready /thread/new page.
    */
   async _openThreadPage(credentials, { signal, log }) {
+    signal?.throwIfAborted();
     const rawCookie = resolveMuseCookie(credentials);
     if (!rawCookie) throw new MuseWebAuthError("Missing muse.ai cookies");
 
-    const session = await renewSession(rawCookie, { signal });
-    log?.debug?.(
-      "MUSE-WEB",
-      `session renewed (status=${session.meta.session_status ?? "?"}, vm=${session.meta.vm_state ?? "?"})`
-    );
-
-    const key = `muse-web:${createHash("sha256").update(rawCookie).digest("hex").slice(0, 16)}`;
+    const key = `muse-web:${credentials?.connectionId || ""}:${createHash("sha256").update(rawCookie).digest("hex")}`;
+    const cached = sessions.get(key);
+    let cookieHeader = cached?.cookieHeader || rawCookie;
+    let reuseSession = false;
+    if (cached) {
+      const cookies = await cached.context.cookies(NEW_THREAD_URL).catch(() => null);
+      if (cookies?.length) {
+        cookieHeader = cookies.map(({ name, value }) => `${name}=${value}`).join("; ");
+        reuseSession = Date.now() - cached.renewedAt < SESSION_REUSE_MS
+          && cookies.some(({ name, value }) => name === "hatch_sess" && value);
+      }
+    }
+    let session = { cookieHeader };
+    if (!reuseSession) {
+      const verdict = await confirmSessionDead({
+        // The web client wakes the VM with its current browser auth; a plain HTTP wake duplicates it.
+        renew: () => renewSession(cookieHeader, { signal, wakeVm: false }),
+        signal,
+      });
+      if (verdict.dead) {
+        await discardWarmThread(key);
+        throw new MuseWebAuthError(SESSION_EXPIRED_BADGE);
+      }
+      if (verdict.error) throw verdict.error;
+      session = verdict.session;
+      log?.debug?.(
+        "MUSE-WEB",
+        `session renewed (status=${session.meta.session_status ?? "?"}, vm=${session.meta.vm_state ?? "?"}, check=${verdict.reason})`
+      );
+    }
+    const renewedAt = reuseSession ? cached.renewedAt : Date.now();
+    const renewedCookies = toMuseCookies(session.cookieHeader);
+    const names = new Set(renewedCookies.map(({ name }) => name));
+    // Plain HTTP renewal does not apply Set-Cookie deletions to the browser.
+    renewedCookies.push(...toMuseCookies(cookieHeader)
+      .filter(({ name }) => !names.has(name))
+      .map((cookie) => ({ ...cookie, expires: 1 })));
     const executablePath = resolveSystemChromeExecutable();
     let pooled = await acquireBrowserContext(key, {
       cookieDomain: ".muse.ai",
       cookieString: session.cookieHeader,
       ...(executablePath ? { executablePath } : {}),
     });
-    // Re-seed the pooled context with the freshly rotated cookies every
-    // request; seeding at creation alone would go stale as muse.ai rotates.
+    let releaseContext = retainBrowserContext(pooled);
+    let page = null;
+    let closing;
+    let handedOff = false;
+    const onAbort = () => { void close(); };
+    const close = () => {
+      if (handedOff) return Promise.resolve();
+      closing ??= (async () => {
+        signal?.removeEventListener("abort", onAbort);
+        await page?.close().catch(() => {});
+        releaseContext();
+      })();
+      return closing;
+    };
+    const keep = () => {
+      if (handedOff || closing || !page) return;
+      handedOff = true;
+      signal?.removeEventListener("abort", onAbort);
+      scheduleWarmThread(key, page, pooled.context, releaseContext, log);
+    };
     try {
-      await pooled.context.addCookies(toMuseCookies(session.cookieHeader));
-    } catch {
-      await releaseBrowserContext(key);
-      pooled = await acquireBrowserContext(key, {
-        cookieDomain: ".muse.ai",
-        cookieString: session.cookieHeader,
-        ...(executablePath ? { executablePath } : {}),
-      });
+      signal?.throwIfAborted();
+      try {
+        await pooled.context.addCookies(renewedCookies);
+      } catch {
+        if (warmThreads.get(key)?.context === pooled.context) await discardWarmThread(key);
+        releaseContext();
+        await releaseBrowserContext(key);
+        pooled = await acquireBrowserContext(key, {
+          cookieDomain: ".muse.ai",
+          cookieString: session.cookieHeader,
+          ...(executablePath ? { executablePath } : {}),
+        });
+        releaseContext = retainBrowserContext(pooled);
+      }
+      const state = { context: pooled.context, cookieHeader: session.cookieHeader, renewedAt };
+      sessions.set(key, state);
+      if (cached?.context !== pooled.context) {
+        pooled.context.once("close", () => {
+          if (sessions.get(key)?.context === pooled.context) sessions.delete(key);
+          const warm = warmThreads.get(key);
+          if (warm?.context !== pooled.context) return;
+          warmThreads.delete(key);
+          clearWarmTimer(warm);
+          warm.releaseContext();
+        });
+      }
+      signal?.throwIfAborted();
+      const openedAt = Date.now();
+      page = await claimWarmThread(key, pooled.context);
+      if (page) {
+        signal?.addEventListener("abort", onAbort, { once: true });
+        log?.info?.("MUSE-WEB", `warm thread ready in ${Date.now() - openedAt}ms`);
+      } else {
+        page = await pooled.context.newPage();
+        signal?.addEventListener("abort", onAbort, { once: true });
+        signal?.throwIfAborted();
+        await page.goto(NEW_THREAD_URL, { waitUntil: "domcontentloaded", timeout: PAGE_READY_TIMEOUT_MS });
+        await waitForThreadReady(page, signal);
+        log?.info?.("MUSE-WEB", `cold thread ready in ${Date.now() - openedAt}ms`);
+      }
+      return { page, close, keep };
+    } catch (error) {
+      await close();
+      if (reuseSession && error instanceof MuseWebAuthError) {
+        sessions.delete(key);
+        return this._openThreadPage(credentials, { signal, log });
+      }
+      throw error;
     }
-
-    const page = await pooled.context.newPage();
-    await page.goto(NEW_THREAD_URL, { waitUntil: "domcontentloaded", timeout: PAGE_READY_TIMEOUT_MS });
-    await waitForThreadReady(page);
-    return { key, page };
   }
 
   async execute({ model, body, stream, credentials, signal, log }) {
@@ -514,66 +822,79 @@ export class MuseWebExecutor extends BaseExecutor {
       };
     }
 
-    let page = null;
-    const onAbort = () => {
-      page?.close().catch(() => {});
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
+    const cancellation = new AbortController();
+    signal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
+    let opened;
+    let release;
+    let streaming = false;
+    let keepPage = false;
 
     try {
+      signal.throwIfAborted();
+      release = reserveAccount(credentials);
       // Setup phase runs eagerly so auth/ready failures return a real HTTP
       // status instead of a stream that errors on first read.
-      const opened = await this._openThreadPage(credentials, { signal, log });
-      page = opened.page;
+      opened = await this._openThreadPage(credentials, { signal, log });
+      const { page } = opened;
 
-      const base = await readChatState(page);
-      await attachImages(page, images);
-      await sendPrompt(page, flatPrompt);
-
-      const closePage = async () => {
-        signal?.removeEventListener("abort", onAbort);
-        await page?.close().catch(() => {});
-      };
+      const base = await readChatState(page, flatPrompt);
+      await attachImages(page, images, signal);
+      await sendPrompt(page, flatPrompt, signal);
 
       if (stream) {
         const encoder = new TextEncoder();
-        const streamPage = page;
-        page = null; // ownership moves into the stream
+        const id = `chatcmpl-muw-${randomUUID()}`;
+        const created = Math.floor(Date.now() / 1000);
+        let task;
+        let cancelled = false;
         const readable = new ReadableStream(
           {
-            async start(controller) {
-              try {
-                await pollChat({
-                  page: streamPage,
-                  base,
-                  signal,
-                  onDelta: (delta) => {
-                    controller.enqueue(
-                      encoder.encode(`data: ${JSON.stringify(formatStreamChunk(delta, modelId))}\n\n`)
-                    );
-                  },
-                });
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify(formatStreamChunk("", modelId, "stop"))}\n\n`)
-                );
-                controller.enqueue(encoder.encode(SSE_DONE));
-                controller.close();
-              } catch (error) {
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({ error: { message: error.message || "muse-web stream failed" } })}\n\n`
-                  )
-                );
-                controller.enqueue(encoder.encode(SSE_DONE));
-                controller.close();
-              } finally {
-                signal?.removeEventListener("abort", onAbort);
-                await streamPage.close().catch(() => {});
-              }
+            start(controller) {
+              task = (async () => {
+                try {
+                  await pollChat({
+                    page,
+                    base,
+                    signal,
+                    prompt: flatPrompt,
+                    onDelta: (delta) => {
+                      controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify(formatStreamChunk(delta, modelId, id, created))}\n\n`)
+                      );
+                    },
+                  });
+                  if (cancelled) return;
+                  keepPage = true;
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify(formatStreamChunk("", modelId, id, created, "stop"))}\n\n`)
+                  );
+                  controller.enqueue(encoder.encode(SSE_DONE));
+                  controller.close();
+                } catch (error) {
+                  if (cancelled) return;
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({ error: { message: error.message || "muse-web stream failed" } })}\n\n`
+                    )
+                  );
+                  controller.enqueue(encoder.encode(SSE_DONE));
+                  controller.close();
+                } finally {
+                  if (keepPage && !cancelled) opened.keep();
+                  else await opened.close();
+                  release();
+                }
+              })();
+            },
+            cancel() {
+              cancelled = true;
+              cancellation.abort();
+              return task;
             },
           },
           { highWaterMark: 16384 }
         );
+        streaming = true;
         return {
           response: new Response(readable, { status: 200, headers: { ...SSE_HEADERS_NO_BUFFER } }),
           url: "https://muse.ai",
@@ -582,8 +903,8 @@ export class MuseWebExecutor extends BaseExecutor {
         };
       }
 
-      const responseText = await pollChat({ page, base, signal });
-      await closePage();
+      const responseText = await pollChat({ page, base, signal, prompt: flatPrompt });
+      keepPage = true;
       return {
         response: new Response(JSON.stringify(formatChatCompletion(responseText, modelId)), {
           status: 200,
@@ -594,8 +915,6 @@ export class MuseWebExecutor extends BaseExecutor {
         transformedBody: body,
       };
     } catch (error) {
-      signal?.removeEventListener("abort", onAbort);
-      await page?.close().catch(() => {});
       const message = error instanceof Error ? error.message : "Unknown error";
 
       // A missing Playwright browser is a host/config problem, not a transient
@@ -618,7 +937,7 @@ export class MuseWebExecutor extends BaseExecutor {
       // fallback layer from retrying it as a transient 5xx.
       if (
         error instanceof Error &&
-        (error.name === "TimeoutError" || message.includes("waitForSelector") || message.includes("actionability"))
+        !signal.aborted && (message.includes("waitForSelector") || message.includes("actionability"))
       ) {
         return {
           response: errorResponse(400, message),
@@ -628,11 +947,17 @@ export class MuseWebExecutor extends BaseExecutor {
         };
       }
       return {
-        response: errorResponse(statusForError(error), message),
+        response: errorResponse(signal.aborted ? 499 : statusForError(error), message),
         url: "https://muse.ai",
         headers: {},
         transformedBody: body,
       };
+    } finally {
+      if (!streaming) {
+        if (keepPage) opened?.keep();
+        else await opened?.close();
+        release?.();
+      }
     }
   }
 
@@ -643,30 +968,44 @@ export class MuseWebExecutor extends BaseExecutor {
    * @returns {Promise<Array<{ b64: string, mime: string, width?: number, height?: number }>>}
    */
   async generateMedia({ prompt, kind = "image", size, duration, n = 1, images, credentials, signal, log }) {
-    if (!prompt) throw new MuseWebUpstreamError("prompt is required for media generation");
+    if (typeof prompt !== "string" || !prompt.trim() || !["image", "video"].includes(kind) || !Number.isInteger(n) || n < 1 || n > 4) {
+      throw Object.assign(new Error("Media requires a prompt, image/video kind and integer n between 1 and 4"), { status: 400 });
+    }
+    signal?.throwIfAborted();
+    const release = reserveAccount(credentials);
     const mediaPrompt = buildMediaPrompt(prompt, kind, size, duration, Boolean(images?.length));
     const timeoutMs = kind === "video" ? VIDEO_TIMEOUT_MS : IMAGE_TIMEOUT_MS;
     const results = [];
 
-    for (let i = 0; i < Math.max(1, n); i++) {
-      const { page } = await this._openThreadPage(credentials, { signal, log });
-      try {
-        const base = await readChatState(page);
-        if (images?.length) await attachImages(page, images);
-        await sendPrompt(page, mediaPrompt);
-        const att = await waitForMedia({ page, base, kind, timeoutMs, signal, log });
-        const media = await downloadMedia(page, att, kind);
-        results.push({
-          b64: media.b64,
-          mime: media.mime,
-          ...(att.w ? { width: att.w } : {}),
-          ...(att.h ? { height: att.h } : {}),
-        });
-      } finally {
-        await page.close().catch(() => {});
+    try {
+      for (let i = 0; i < n; i++) {
+        signal?.throwIfAborted();
+        const opened = await this._openThreadPage(credentials, { signal, log });
+        const { page } = opened;
+        try {
+          const base = await readChatState(page, mediaPrompt, true);
+          if (images?.length) await attachImages(page, images, signal);
+          await sendPrompt(page, mediaPrompt, signal);
+          const att = await waitForMedia({ page, base, kind, timeoutMs, signal, log, prompt: mediaPrompt });
+          const media = await downloadMedia(page, att, kind);
+          results.push({
+            b64: media.b64,
+            mime: media.mime,
+            ...(att.w ? { width: att.w } : {}),
+            ...(att.h ? { height: att.h } : {}),
+          });
+        } finally {
+          await opened.close();
+        }
       }
+      return results;
+    } catch (error) {
+      if (signal?.aborted) throw Object.assign(new Error("Request aborted"), { name: "AbortError", status: 499 });
+      if (error?.name === "TimeoutError") throw new MuseWebTimeoutError("Muse Web request timed out");
+      throw error;
+    } finally {
+      release();
     }
-    return results;
   }
 }
 
